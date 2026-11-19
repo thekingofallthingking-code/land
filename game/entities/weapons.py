@@ -39,6 +39,10 @@ class WeaponSpec:
     automatic: bool = False
     starting: bool = False
     projectile: bool = False
+    burst_shots: int = 1
+    burst_interval: float = 0.0
+    aimed_spread_scale: float = .48
+    aim_fov: float | None = None
 
 
 _SPECS = tuple(WeaponSpec(**spec) for spec in json.loads(
@@ -88,6 +92,7 @@ class _CombatAudio:
         self._volume = {
             "pistol": .56, "smg": .47, "shotgun": .73, "rifle": .58,
             "melee": .51, "dry": .36, "reload": .36, "grenade": .37, "rocket": .63,
+            "burst": .49, "revolver": .69, "drum": .64, "marksman": .61,
         }
         if loader is None:
             return
@@ -97,7 +102,7 @@ class _CombatAudio:
             if not path.is_file():
                 continue
             pool = []
-            for _ in range(3 if key in ("pistol", "smg", "rifle") else 1):
+            for _ in range(3 if key in ("pistol", "smg", "rifle", "burst", "drum") else 1):
                 sound = loader.loadSfx(Filename.from_os_specific(str(path)))
                 if sound is None:
                     continue
@@ -145,6 +150,7 @@ class WeaponSystem:
         self.selected = WEAPON_SPECS["pistol"]
         self.cooldown = 0.0
         self.reload_remaining = 0.0
+        self._burst_remaining = 0
 
     @staticmethod
     def _starting_inventory():
@@ -155,6 +161,13 @@ class WeaponSystem:
     def ammo(self) -> tuple[int, int]:
         supply = self._inventory[self.selected.id]
         return supply.magazine, supply.reserve
+
+    @property
+    def burst_pending(self) -> bool:
+        return self._burst_remaining > 0
+
+    def cancel_burst(self) -> None:
+        self._burst_remaining = 0
 
     def owns(self, weapon_id: str) -> bool:
         return weapon_id in self._inventory
@@ -182,12 +195,14 @@ class WeaponSystem:
         if spec is not self.selected:
             self.selected = spec
             self.reload_remaining = 0.0
+            self.cancel_burst()
         return True
 
     def reload(self) -> bool:
         magazine, reserve = self.ammo
         if self.reload_remaining > 0 or magazine >= self.selected.capacity or not reserve:
             return False
+        self.cancel_burst()
         self.reload_remaining = self.selected.reload_seconds
         self._audio.play("reload")
         return True
@@ -216,6 +231,7 @@ class WeaponSystem:
         self._inventory = self._starting_inventory()
         self.selected = WEAPON_SPECS["pistol"]
         self.cooldown = self.reload_remaining = 0.0
+        self.cancel_burst()
         self.effects.clear()
         if not isinstance(data, dict) or not isinstance(data.get("inventory"), dict):
             return
@@ -270,7 +286,7 @@ class WeaponSystem:
         return contact
 
     def _directions(self, forward, aimed, spec):
-        spread = tan(radians(spec.spread_degrees * (.48 if aimed else 1.0)))
+        spread = tan(radians(spec.spread_degrees * (spec.aimed_spread_scale if aimed else 1.0)))
         right = forward.cross(_UP)
         if right.length_squared() < 1e-8:
             right = Vec3(1, 0, 0)
@@ -290,7 +306,9 @@ class WeaponSystem:
              targets=(), ignore=(), owner=None, people=None, muzzle=None) -> ShotResult | None:
         """Use the aim ray to target the crosshair, then fire from the muzzle."""
         spec = self.selected
-        if self.reload_remaining > 0 or self.cooldown > 1e-8 or (not pressed and not spec.automatic):
+        if self.reload_remaining > 0 or self.cooldown > 1e-8:
+            return None
+        if not (pressed or spec.automatic or self.burst_pending):
             return None
         origin, direction = Vec3(origin), Vec3(direction)
         start = Vec3(muzzle) if muzzle is not None else origin
@@ -306,7 +324,10 @@ class WeaponSystem:
                 self._audio.play("dry", origin)
             return None
 
-        self.cooldown = 1 / spec.rounds_per_second
+        if spec.burst_shots > 1:
+            rounds = self._burst_remaining or min(spec.burst_shots, supply.magazine)
+            self._burst_remaining = rounds - 1
+        self.cooldown = spec.burst_interval if self.burst_pending else 1 / spec.rounds_per_second
         mapping = {target.body: target.entity for target in targets}
         if melee:
             self.events.publish("melee", position=origin, direction=direction, weapon=spec.id, owner=owner)
@@ -338,7 +359,7 @@ class WeaponSystem:
             return ShotResult(spec.recoil_degrees, False, False, None)
         self.events.publish("gunshot", position=start, direction=direction, weapon=spec.id, owner=owner)
         self._audio.play(spec.id, start, pitch=self._pitch.uniform(.96, 1.04))
-        self.effects.flash(start, direction, scale=1.42 if spec.id == "shotgun" else 1)
+        self.effects.flash(start, direction, scale=1.42 if spec.pellets > 1 else 1)
         hits = {}
         for index, ray in enumerate(self._directions(direction, aimed, spec)):
             contact = near_wall or self._trace(start, ray, spec.range_meters, ignore, mapping, people)
@@ -392,7 +413,32 @@ _MODEL_LAYOUT = {
     "shotgun": (.16, .77, .14, .33, (.61, .34, .18)),
     "rifle": (.15, .69, .15, .32, (.52, .48, .33)),
     "rocket": (.23, .89, .23, .41, (.29, .43, .37)),
+    "burst": (.16, .43, .17, .23, (.24, .53, .54)),
+    "revolver": (.17, .42, .19, .10, (.62, .41, .22)),
+    "drum": (.22, .56, .19, .29, (.52, .30, .36)),
+    "marksman": (.15, .97, .18, .36, (.28, .42, .57)),
 }
+
+
+def _beveled_shell(mesh, center, size, color):
+    x, y, z = center
+    width, length, height = (dimension / 2 for dimension in size)
+    bevel = min(width, height) * .40
+    outline = (
+        (-width + bevel, -height), (width - bevel, -height),
+        (width, -height + bevel), (width, height - bevel),
+        (width - bevel, height), (-width + bevel, height),
+        (-width, height - bevel), (-width, -height + bevel),
+    )
+    rear = [(x + u, y - length, z + v) for u, v in outline]
+    front = [(x + u, y + length, z + v) for u, v in outline]
+    mesh.face(rear, color)
+    mesh.face(front[::-1], color)
+    shades = (.70, .76, .87, .95, 1.0, .96, .90, .77)
+    for index, shade in enumerate(shades):
+        after = (index + 1) % len(outline)
+        mesh.face((rear[index], front[index], front[after], rear[after]),
+                  tuple(channel * shade for channel in color))
 
 
 def build_weapon_model(parent, weapon_id):
@@ -410,14 +456,30 @@ def build_weapon_model(parent, weapon_id):
     steel = (.16, .20, .22)
     grip = (.09, .11, .13)
     mesh = Mesh(f"{weapon_id} procedural gear")
-    mesh.box((0, barrel * .37, upper), (width, barrel * .78, upper * .70), accent, bottom=True)
-    mesh.box((0, barrel * .61, upper * .98), (width * .47, barrel * .78, upper * .34), steel, bottom=True)
+    body = (0, barrel * .37, upper), (width, barrel * .78, upper * .70), accent
+    nose = (0, barrel * .61, upper * .98), (width * .47, barrel * .78, upper * .34), steel
+    if weapon_id in ("burst", "revolver", "drum", "marksman"):
+        _beveled_shell(mesh, *body)
+        _beveled_shell(mesh, *nose)
+    else:
+        mesh.box(*body, bottom=True)
+        mesh.box(*nose, bottom=True)
     mesh.box((0, 0, 0), (width * .73, .12, .24), grip, bottom=True)
-    if weapon_id != "pistol":
+    if stock >= .18:
         mesh.box((0, -stock * .43, upper * .79), (width * .63, stock, upper * .51), steel, bottom=True)
         mesh.box((0, -stock * .88, upper * .57), (width * .89, .08, upper * 1.17), grip, bottom=True)
-    if weapon_id in ("smg", "rifle"):
+    if weapon_id in ("smg", "rifle", "burst", "marksman"):
         mesh.box((0, barrel * .28, .047), (width * .64, .121, .21), steel, bottom=True)
+    if weapon_id == "revolver":
+        _beveled_shell(mesh, (0, .07, upper * .91), (width * 1.23, .14, .14), steel)
+        for side in (-1, 1):
+            mesh.box((side * width * .66, .07, upper * .91), (.025, .11, .075), accent, bottom=True)
+    elif weapon_id == "drum":
+        mesh.cone(0, barrel * .26, -.08, .12, .145, .145, steel, 10)
+        mesh.cone(0, barrel * .26, .038, .052, .134, .129, accent, 10)
+    elif weapon_id == "marksman":
+        mesh.box((0, barrel * .22, upper * 1.65), (.10, .23, .085), steel, bottom=True)
+        mesh.box((0, barrel * .31, upper * 1.65), (.114, .055, .099), accent, bottom=True)
     mesh.box((0, barrel * .73, upper * 1.44), (.036, .052, .033), grip, bottom=True)
     mesh.node().reparent_to(root)
     return root

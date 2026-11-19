@@ -16,16 +16,18 @@ PRESETS = {
     "Medium": dict(shadow=1024, far=630, radius=2, msaa=0),
     "High": dict(shadow=2048, far=800, radius=3, msaa=2),
 }
+WEAPON_KEYS = {slot: str(slot) for slot in range(1, 10)} | {10: "0", 11: "-"}
+
 DEFAULT_BINDINGS = {
     "forward": "w", "back": "s", "left": "a", "right": "d", "sprint": "shift",
     "jump": "space", "interact": "f", "vehicle_view": "c", "talk": "e",
-    "aim": "mouse3", "fire": "mouse1", "reload": "r",
+    "aim": "mouse3", "fire": "mouse1", "reload": "r", "cycle_weapon": "q",
 }
 ACTION_LABELS = {
     "forward": "Forward / accelerate", "back": "Back / brake",
     "left": "Left", "right": "Right", "sprint": "Sprint", "jump": "Jump / handbrake",
     "interact": "Vehicle entry / exit", "vehicle_view": "Vehicle view", "talk": "Interact",
-    "aim": "Aim", "fire": "Fire / melee", "reload": "Reload",
+    "aim": "Aim", "fire": "Fire / melee", "reload": "Reload", "cycle_weapon": "Next weapon",
 }
 EXTRA_KEYS = frozenset(("space", "shift", "control", "alt", "tab", "mouse1", "mouse2",
                         "mouse3", "arrow_up", "arrow_down", "arrow_left", "arrow_right"))

@@ -1,20 +1,20 @@
 """Procedural district architecture and street furniture."""
 
-from math import cos, sin, tau
+from math import cos, hypot, sin, tau
 
 from .roads import CHUNK_MAX, CHUNK_SIZE, ROAD_HALF_WIDTH
 
 
 PAVING = {
-    "downtown": (.48, .49, .49),
-    "residential": (.51, .47, .43),
-    "harbor": (.40, .43, .45),
-    "beachfront": (.61, .53, .43),
-    "park": (.40, .46, .40),
+    "downtown": (.49, .46, .41),
+    "residential": (.49, .44, .39),
+    "harbor": (.38, .41, .42),
+    "beachfront": (.58, .49, .38),
+    "park": (.42, .45, .37),
 }
 OFFICE_PALETTE = (
-    (.24, .36, .44), (.48, .43, .38), (.33, .46, .48),
-    (.64, .57, .47), (.42, .48, .54), (.43, .32, .32),
+    (.26, .37, .42), (.55, .41, .31), (.29, .46, .44),
+    (.69, .58, .44), (.43, .49, .53), (.47, .32, .30),
 )
 HOUSE_PALETTE = (
     (.70, .45, .31), (.72, .62, .43), (.38, .56, .51),
@@ -24,15 +24,15 @@ CONTAINER_PALETTE = (
     (.18, .43, .48), (.62, .30, .19), (.74, .56, .25),
     (.30, .35, .51), (.38, .51, .34),
 )
-GLASS = ((.15, .27, .34), (.21, .36, .42), (.25, .40, .44))
-LIT_GLASS = ((.96, .61, .26), (.95, .76, .44), (.61, .82, .83))
+GLASS = ((.086, .17, .235), (.12, .24, .31), (.16, .32, .36))
+LIT_GLASS = ((.92, .51, .19), (.93, .68, .36), (.47, .72, .75))
 POST = (.17, .24, .26)
 TRIM = (.20, .29, .32)
 YELLOW = (.93, .69, .27)
 WHITE = (.84, .84, .74)
 GRASS = (.30, .40, .29)
 DEEP_GRASS = (.23, .36, .29)
-ROAD = (.19, .22, .25)
+ROAD = (.164, .174, .182)
 SIDEWALK = .18
 SHOP_POSITION = (15.6, 46, SIDEWALK + .01)
 HOSPITAL_POSITION = (13.5, -28, SIDEWALK + .01)
@@ -50,6 +50,13 @@ BENCH_FACING = {
     "south": (0, -1, 180.0),
     "west": (-1, 0, 90.0),
 }
+STREET_FRONTS = (
+    ("ATLAS BOOKS", (.32, .55, .48)),
+    ("TIDEWAY GOODS", (.59, .31, .21)),
+    ("NORTHLINE CAFE", (.25, .43, .49)),
+    ("SEAGLASS", (.40, .47, .29)),
+    ("UNION MARKET", (.49, .32, .36)),
+)
 
 PIXEL_FONT = {
     "A": (2, 5, 7, 5, 5), "B": (6, 5, 6, 5, 6), "C": (3, 4, 4, 4, 3),
@@ -66,6 +73,26 @@ PIXEL_FONT = {
     "6": (3, 4, 6, 5, 2), "7": (7, 1, 2, 4, 4), "8": (2, 5, 2, 5, 2),
     "9": (2, 5, 3, 1, 6),
 }
+
+
+def _letter_rectangles(rows):
+    """Cover each block glyph with contiguous strokes."""
+    pixels = {(y, x) for y, row in enumerate(rows) for x in range(3) if row & (4 >> x)}
+    rectangles = []
+    while pixels:
+        y, x = min(pixels)
+        right = x + 1
+        while (y, right) in pixels:
+            right += 1
+        bottom = y + 1
+        while all((bottom, column) in pixels for column in range(x, right)):
+            bottom += 1
+        rectangles.append((x, y, right, bottom))
+        pixels.difference_update((row, col) for row in range(y, bottom) for col in range(x, right))
+    return tuple(rectangles)
+
+
+LETTER_STROKES = {symbol: _letter_rectangles(rows) for symbol, rows in PIXEL_FONT.items()}
 
 
 def panel(mesh, face, plane, start, end, floor, roof, color):
@@ -90,20 +117,18 @@ def panel(mesh, face, plane, start, end, floor, roof, color):
 
 
 def lettering(mesh, face, plane, center, bottom, scale, text, color):
-    letters = text[::-1] if face in ("west", "north") else text
-    step = scale if face in ("east", "south") else -scale
+    reverse = face in ("west", "north")
+    letters = text[::-1] if reverse else text
     # The swath increases in world coordinates on every face. Flip each glyph
     # as well as their order when a viewer's screen runs the other way.
     start = center - (len(text) * 4 - 1) * scale * .5
     for i, symbol in enumerate(letters):
-        for row, pattern in enumerate(PIXEL_FONT[symbol]):
-            for col in range(3):
-                if pattern & (4 >> col):
-                    column = col if step > 0 else 2 - col
-                    x = start + (i * 4 + column) * scale
-                    y = bottom + (4 - row) * scale
-                    panel(mesh, face, plane, x, x + scale * .87,
-                          y, y + scale * .87, color)
+        letter_x = start + i * 4 * scale
+        for left, top, right, low in LETTER_STROKES[symbol]:
+            if reverse:
+                left, right = 3 - right, 3 - left
+            panel(mesh, face, plane, letter_x + left * scale, letter_x + right * scale,
+                  bottom + (5 - low) * scale, bottom + (5 - top) * scale, color)
 
 
 def street_surfaces(mesh, chunk_x, chunk_y, district, rng):
@@ -119,6 +144,7 @@ def street_surfaces(mesh, chunk_x, chunk_y, district, rng):
         mesh.slab(half, extent, extent, edge_y, .002, ROAD)
     pavement = PAVING[district]
     mesh.box((72, 72, .03), (127, 127, .30), pavement)
+    street_detail(mesh, district, pavement, half, extent)
     for offset in (half + .12, extent - .12):
         mesh.slab(offset - .10, half, offset + .10, extent, .187, WHITE)
         mesh.slab(half, offset - .10, extent, offset + .10, .187, WHITE)
@@ -147,6 +173,49 @@ def street_surfaces(mesh, chunk_x, chunk_y, district, rng):
         for along in (19, 29, 43, 54, 61, 71, 82, 94, 105, 116):
             mesh.slab(5.05, along, 7.15, along + .10, .014, (.61, .62, .59))
             mesh.slab(along, -7.15, along + .10, -5.05, .014, (.61, .62, .59))
+
+
+def street_detail(mesh, district, pavement, half, extent):
+    """Batched asphalt patches, concrete panels, and storm-water hardware."""
+    gutter = (.127, .143, .151)
+    shoulder = (.187, .197, .204)
+    curb = tuple(c + .105 for c in pavement)
+    joint = tuple(c * .79 for c in pavement)
+    for side in (-1, 1):
+        near, far = sorted((side * 7.42, side * 8.47))
+        mesh.slab(half + .28, near, extent, far, .007, gutter)
+        mesh.slab(near, half + .28, far, extent, .007, gutter)
+        near, far = sorted((side * 5.15, side * 7.42))
+        mesh.slab(14, near, extent, far, .006, shoulder)
+        mesh.slab(near, 14, far, extent, .006, shoulder)
+    for edge in (half, extent - .30):
+        mesh.slab(edge, half, edge + .30, extent, .205, curb)
+        mesh.slab(half, edge, extent, edge + .30, .205, curb)
+    for along in range(15, 132, 4):
+        variation = ((along // 4) % 4 - 1.4) * .017
+        slab = tuple(c + variation for c in pavement)
+        mesh.slab(8.84, along, 14.2, along + 3.94, .195, slab)
+        mesh.slab(along, 8.84, along + 3.94, 14.2, .195, slab)
+    for cross in (10.55, 13.3):
+        mesh.slab(cross, 15, cross + .038, 134.94, .202, joint)
+        mesh.slab(15, cross, 134.94, cross + .038, .202, joint)
+    for lower in (9.05, 12.28, CHUNK_SIZE - 13.2, CHUNK_SIZE - 9.7):
+        # Coarse ochre inserts mark the sidewalks at the raised corners.
+        for start in (9.03, extent - 1.14):
+            mesh.slab(start, lower, start + .78, lower + .54, .214, (.57, .45, .27))
+            mesh.slab(lower, start, lower + .54, start + .78, .214, (.57, .45, .27))
+    for along in (34.8, 103.6):
+        for off in (-8.19, 7.65):
+            mesh.slab(off, along, off + .53, along + .78, .012, (.105, .119, .124))
+            mesh.slab(along, off, along + .78, off + .53, .012, (.105, .119, .124))
+            for bar in range(5):
+                start = along + .078 + bar * .14
+                mesh.slab(off + .03, start, off + .50, start + .045, .020, (.23, .25, .24))
+                mesh.slab(start, off + .03, start + .045, off + .50, .020, (.23, .25, .24))
+    if district in ("downtown", "harbor"):
+        for x, y in ((1.3, 36.0), (88.0, -1.5)):
+            mesh.cone(x, y, .008, .014, .38, .38, (.131, .158, .162), 9)
+            mesh.slab(x - .27, y - .028, x + .27, y + .028, .027, (.24, .26, .26))
 
 
 def street_lamp(mesh, glow, x, y, dx, dy):
@@ -273,6 +342,7 @@ def window_rows(mesh, glow, x, y, width, depth, base, floors, floor_step, rng,
         ("west", x - width * .5 - .075, y - depth * .5, depth, -1),
         ("east", x + width * .5 + .075, y - depth * .5, depth, 1),
     )
+    height = floor_step * {"curtain": .76, "ribbon": .51, "punched": .46}[style]
     for face, plane, start, span, outward in front_edges:
         columns = max(1, round(span / (2.95 if style == "curtain" else 4.6)))
         spacing = (span - 1.35) / columns
@@ -287,14 +357,52 @@ def window_rows(mesh, glow, x, y, width, depth, base, floors, floor_step, rng,
             center = start + .675 + (column + .5) * spacing
             for floor in range(floors):
                 bottom = base + floor * floor_step + .68
-                top = bottom + floor_step * {"curtain": .76, "ribbon": .51,
-                                             "punched": .46}[style]
+                top = bottom + height
                 color = GLASS[(column * 5 + floor + rng.randrange(3)) % 3]
                 panel(mesh, face, plane, center - pane * .5, center + pane * .5,
                       bottom, top, color)
                 if rng.random() < (.35 if floors > 2 else .55):
-                    panel(glow, face, plane + outward * .05, center - pane * .5,
-                          center + pane * .5, bottom, top, rng.choice(LIT_GLASS))
+                    light = rng.choice(LIT_GLASS)
+                    trimmed = (column + floor) % 4 == 0
+                    trim = pane * (.24 if trimmed else .055)
+                    panel(glow, face, plane + outward * .05, center - pane * .5 + trim,
+                          center + pane * .46, bottom + .035, top - .055, light)
+
+
+def podium_front(mesh, glow, x, y, width, depth, floors, landmark):
+    """Add entrances and a street-facing canopy to the existing podium shell."""
+    name, accent = STREET_FRONTS[(round(x + 2 * y) + floors * 3) % len(STREET_FRONTS)]
+    if landmark:
+        name, accent = "EXCHANGE HALL", (.17, .39, .38)
+    axes = (
+        ("west" if x < 72 else "east", x, y, width, depth, True),
+        ("south" if y < 72 else "north", y, x, depth, width, False),
+    )
+    for face, perpendicular, along, depth, span, x_face in axes:
+        outward = -1 if face in ("south", "west") else 1
+        wall = perpendicular + outward * depth * .5
+        pane = wall + outward * .19
+        panel(mesh, face, pane, along - span * .48, along + span * .48,
+              .205, .58, (.30, .33, .32))
+        panel(mesh, face, pane, along - 2.36, along + 2.36, .29, 3.23, TRIM)
+        for offset in (-1.08, 1.08):
+            center = along + offset
+            panel(mesh, face, pane + outward * .032, center - .94, center + .94,
+                  .55, 2.98, GLASS[1])
+            handle = center - offset * .55
+            panel(mesh, face, pane + outward * .072, handle - .032, handle + .032,
+                  1.07, 1.37, (.68, .67, .56))
+        canopy_center = wall + outward * .62
+        center = (canopy_center, along, 3.33) if x_face else (along, canopy_center, 3.33)
+        size = (1.37, 7.35, .21) if x_face else (7.35, 1.37, .21)
+        mesh.box(center, size, accent, bottom=True)
+        if x_face and (landmark or (round(x + y) + floors) % 3 != 0):
+            sign_plane = wall + outward * .24
+            panel(mesh, face, sign_plane, along - 4.1, along + 4.1, 3.50, 4.11, accent)
+            lettering(mesh, face, sign_plane + outward * .029, along, 3.56, .097,
+                      name, (.91, .82, .63))
+            lettering(glow, face, sign_plane + outward * .067, along, 3.56, .097,
+                      name, (.87, .66, .33))
 
 
 def tower(mesh, glow, collider, x, y, rng, landmark=False):
@@ -315,6 +423,7 @@ def tower(mesh, glow, collider, x, y, rng, landmark=False):
     structure(mesh, collider, x, y, width, depth, SIDEWALK, podium, finish)
     mesh.box((x, y, SIDEWALK + podium), (width + 1.2, depth + 1.2, .35), TRIM)
     window_rows(mesh, glow, x, y, width, depth, SIDEWALK, 1, podium, rng, "ribbon")
+    podium_front(mesh, glow, x, y, width, depth, floors, landmark)
     tx, ty = x + rng.uniform(-2, 2), y + rng.uniform(-2, 2)
     tw, td = width - rng.uniform(5, 11), depth - rng.uniform(5, 11)
     if landmark:
@@ -399,6 +508,12 @@ def clinic(mesh, glow, collider, iy):
         panel(canvas, "west", plane, y - .44, y + .44, 5.29, 5.63, color)
 
 
+def tree_grate(mesh, x, y):
+    mesh.slab(x - .83, y - .83, x + .83, y + .83, .208, (.211, .258, .247))
+    for off in (-.71, -.55, -.38, .37, .54, .70):
+        mesh.slab(x + off, y - .77, x + off + .045, y + .77, .215, (.31, .34, .31))
+
+
 def downtown(mesh, glow, collider, ix, iy, rng):
     central = (ix, iy) == (0, 0)
     if central:
@@ -413,6 +528,16 @@ def downtown(mesh, glow, collider, ix, iy, rng):
             mesh.slab(x, 15.4, x + .045, 57.6, .19, (.36, .38, .37))
         for y in range(18, 58, 3):
             mesh.slab(16.4, y, 63.6, y + .045, .19, (.36, .38, .37))
+        for index in range(8):
+            angle = index * tau / 8
+            side = angle - .19
+            other = angle + .19
+            center_x, center_y = 45.8, 46.7
+            mesh.face(((center_x, center_y, .199),
+                       (center_x + 3.9 * cos(side), center_y + 3.9 * sin(side), .199),
+                       (center_x + 6.0 * cos(angle), center_y + 6.0 * sin(angle), .199),
+                       (center_x + 3.9 * cos(other), center_y + 3.9 * sin(other), .199)),
+                      (.48, .58, .51) if index % 2 == 0 else (.56, .53, .42), (0, 0, 1))
         supply_store(mesh, glow, collider)
         mesh.box((17.2, 36, 1.81), (.46, 4.9, 3.26), (.23, .30, .34))
         mesh.box((16.95, 36, 2.86), (.09, 4.67, .83), (.10, .29, .33))
@@ -432,8 +557,10 @@ def downtown(mesh, glow, collider, ix, iy, rng):
     names = ("TIDEWAY", "ATLAS", "NORTHLINE", "SEAGLASS", "UNION")
     shop_awning(mesh, glow, 101, 19, names[(ix + iy) % len(names)])
     for pos in (25, 60, 89, 122):
+        tree_grate(mesh, 14.9, pos)
         tree(mesh, collider, 14.9, pos, rng)
     for pos in (23, 59, 88, 121):
+        tree_grate(mesh, pos, 14.9)
         tree(mesh, collider, pos, 14.9, rng)
 
 
@@ -518,6 +645,15 @@ def lockup(mesh, glow, collider):
                (x + 7.80, y + 1.25, .198)), paint, (0, 0, 1))
 
 
+def crane_brace(mesh, y, x0, z0, x1, z1, color):
+    length = hypot(x1 - x0, z1 - z0)
+    dx, dz = .26 * (z1 - z0) / length, -.26 * (x1 - x0) / length
+    corners = ((x0 - dx, y, z0 - dz), (x0 + dx, y, z0 + dz),
+               (x1 + dx, y, z1 + dz), (x1 - dx, y, z1 - dz))
+    mesh.face(corners, color)
+    mesh.face(tuple(reversed(corners)), color)
+
+
 def harbor(mesh, glow, collider, ix, iy, rng):
     mesh.slab(13, 13, 131, 131, .184, (.35, .36, .38))
     finish = rng.choice(((.51, .53, .49), (.49, .44, .38), (.37, .46, .47)))
@@ -526,6 +662,11 @@ def harbor(mesh, glow, collider, ix, iy, rng):
     window_rows(mesh, glow, 38, 72, 39, 57, 5.7, 1, 4, rng)
     face_y = 43.49
     panel(mesh, "south", face_y, 28, 48, .30, 5.5, (.18, .25, .29))
+    for x in (26.9, 48.95):
+        panel(mesh, "south", face_y - .07, x - .61, x + .61, .31, 5.72, (.65, .48, .25))
+        for height in (.71, 1.47, 2.23):
+            panel(mesh, "south", face_y - .10, x - .60, x + .60,
+                  height, height + .20, (.30, .33, .31))
     for z in range(1, 6):
         panel(mesh, "south", face_y - .02, 28, 48, z - .13, z, (.31, .35, .37))
     lettering(mesh, "south", face_y - .04, 38, 7.53, .26, f"PIER {ix + 2}",
@@ -544,6 +685,14 @@ def harbor(mesh, glow, collider, ix, iy, rng):
                 structure(mesh, collider, x, y, 1.3, 1.3, SIDEWALK, 22.0, steel)
         for y in (99, 115):
             mesh.box((100.5, y, 22.2), (48.0, 1.65, 1.4), steel)
+            crane_brace(mesh, y, 78, 16.8, 89, 22.4, steel)
+            crane_brace(mesh, y, 123, 16.8, 112, 22.4, steel)
+            for span in range(6):
+                x = 82 + span * 6.2
+                crane_brace(mesh, y, x, 22.5, x + 3.1, 25.1, steel)
+                crane_brace(mesh, y, x + 3.1, 25.1, x + 6.2, 22.5, steel)
+            mesh.box((100.9, y, 25.1), (40.4, .42, .40), steel)
+            glow.box((100.9, y, 25.39), (.31, .28, .26), (.96, .27, .18))
         mesh.box((111, 107, 22.0), (3, 16, .73), steel)
         mesh.box((111, 107, 16.4), (.12, .12, 11.1), POST)
         mesh.box((111, 107, 10.9), (2.1, 2.2, .34), YELLOW)
@@ -575,12 +724,16 @@ def ramp(mesh, collider, x, y):
 
 
 def beachfront(mesh, glow, collider, ix, iy, rng):
-    sand = (.68, .58, .44)
+    sand = (.71, .59, .40)
     mesh.slab(13, 13, 131, 131, .185, sand)
     mesh.slab(12.5, 39.2, 131.5, 48.3, .188, (.52, .40, .30))
     for i in range(101):
         x = 13.2 + i * 1.16
-        mesh.slab(x, 39.2, x + .08, 48.3, .193, (.43, .34, .27))
+        tint = .022 * (i % 4 - 1.5)
+        mesh.slab(x, 39.27, x + 1.10, 48.23, .199,
+                  (.50 + tint, .38 + tint, .28 + tint))
+    for y in (39.32, 47.97):
+        mesh.slab(13.18, y, 130.56, y + .17, .207, (.645, .526, .387))
     for x, y in ((25, 26), (48, 29), (65, 24), (111, 26), (21, 60), (40, 64),
                  (72, 60), (94, 59), (111, 79), (43, 103), (98, 105)):
         tree(mesh, collider, x, y, rng, palm=True)
@@ -589,7 +742,14 @@ def beachfront(mesh, glow, collider, ix, iy, rng):
     surfer_colors = ((.75, .37, .33), (.27, .56, .62), (.75, .59, .35))
     for x, y in ((33, 76), (63, 89), (75, 106), (108, 110)):
         mesh.cone(x, y, SIDEWALK, 2.8, .066, .066, POST, 6)
-        mesh.cone(x, y, 2.54, .70, 2.35, .06, rng.choice(surfer_colors), 8)
+        cloth = rng.choice(surfer_colors)
+        for i in range(8):
+            a, b = i * tau / 8, (i + 1) * tau / 8
+            color = cloth if i % 2 == 0 else (.83, .71, .51)
+            corners = ((x + 2.35 * cos(a), y + 2.35 * sin(a), 2.54),
+                       (x + 2.35 * cos(b), y + 2.35 * sin(b), 2.54), (x, y, 3.24))
+            mesh.face(corners, color)
+            mesh.face(tuple(reversed(corners)), tuple(c * .80 for c in color))
     if iy == -8 and ix % 2 == 0:
         ramp(mesh, collider, 126, 100)
 

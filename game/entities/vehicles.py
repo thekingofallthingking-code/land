@@ -1,6 +1,7 @@
 """Raycast-suspension vehicles and their procedural models."""
 from __future__ import annotations
 
+from functools import lru_cache
 import json
 import math
 from pathlib import Path
@@ -15,6 +16,8 @@ from panda3d.core import (
     GeomVertexData,
     GeomVertexFormat,
     GeomVertexWriter,
+    Material,
+    NodePath,
     PerspectiveLens,
     Point3,
     Spotlight,
@@ -29,7 +32,9 @@ BUMPER = (0.09, 0.12, 0.14, 1.0)
 WINDOW = (0.075, 0.17, 0.23, 1.0)
 TRIM = (0.23, 0.28, 0.30, 1.0)
 TIRE = (0.065, 0.075, 0.085, 1.0)
-RIM = (0.48, 0.56, 0.61, 1.0)
+GLASS_EDGE = (0.025, 0.071, 0.10, 1.0)
+GLASS_TOP = (0.095, 0.19, 0.25, 1.0)
+CHROME = (0.58, 0.64, 0.66, 1.0)
 GEAR_LIMITS = (0.23, 0.38, 0.53, 0.69, 0.85, 1.1)
 GEAR_FORCE = (1.0, 0.84, 0.71, 0.60, 0.51, 0.44)
 
@@ -48,15 +53,15 @@ class _Mesh:
         self.color = GeomVertexWriter(self.data, "color")
         self.faces = GeomTriangles(Geom.UHStatic)
 
-    def face(self, vertices, color):
+    def face(self, vertices, color, *, corner_colors=None):
         a, b, c = (Vec3(*vertex) for vertex in vertices[:3])
         normal = (b - a).cross(c - a)
         normal.normalize()
         start = self.vertex.getWriteRow()
-        for vertex in vertices:
+        for index, vertex in enumerate(vertices):
             self.vertex.addData3f(*vertex)
             self.normal.addData3f(normal)
-            self.color.addData4f(*color)
+            self.color.addData4f(*(corner_colors[index] if corner_colors else color))
         for index in range(1, len(vertices) - 1):
             self.faces.addVertices(start, start + index, start + index + 1)
 
@@ -91,6 +96,67 @@ class _Mesh:
         return parent.attachNewNode(node)
 
 
+def _finish(path, roughness, metallic=0.0):
+    finish = Material(path.get_name())
+    finish.set_base_color((1, 1, 1, 1))
+    finish.set_roughness(roughness)
+    finish.set_metallic(metallic)
+    path.set_material(finish)
+
+
+def _station(profile, y):
+    for previous, following in zip(profile, profile[1:]):
+        if y <= following[0]:
+            blend = (y - previous[0]) / (following[0] - previous[0])
+            return tuple(a + (b - a) * blend for a, b in zip(previous[1:], following[1:]))
+    return profile[-1][1:]
+
+
+def _rolling_shell(mesh, profile, spec, color):
+    """A chamfered body with open fenders around the four wheel positions."""
+    outer = spec["wheel_radius"] + .071
+    axle = spec["wheelbase"] * .5
+    arch_center = -.303
+    stations = {section[0] for section in profile}
+    for axle_y in (-axle, axle):
+        stations.update(axle_y + outer * fraction for fraction in (-1, -.78, -.54, -.28, 0, .28, .54, .78, 1))
+    rings = []
+    samples = []
+    for y in sorted(stations):
+        lower, upper, floor, crown = _station(profile, y)
+        nearest = abs(abs(y) - axle)
+        if nearest < outer:
+            raised = math.sqrt(outer * outer - nearest * nearest) + arch_center
+            floor = max(floor, min(crown - .13, raised))
+            upper += .026 * (1.0 - nearest / outer)
+        lip = min(floor + .038, crown - .09)
+        shoulder = crown - .045
+        rings.append((
+            (-lower * .91, y, floor), (lower * .91, y, floor),
+            (lower, y, lip), (upper, y, shoulder),
+            (upper * .94, y, crown), (-upper * .94, y, crown),
+            (-upper, y, shoulder), (-lower, y, lip),
+        ))
+        samples.append((y, lower, upper, lip, shoulder, crown))
+    mesh.face(rings[0], _tint(color, .84))
+    mesh.face(rings[-1][::-1], _tint(color, .89))
+    for behind, ahead in zip(rings, rings[1:]):
+        for side, tint in enumerate((.47, .67, .88, 1.07, 1.01, 1.07, .88, .67)):
+            following = (side + 1) % 8
+            mesh.face((behind[side], ahead[side], ahead[following], behind[following]), _tint(color, tint))
+    return samples
+
+
+def _side_detail(mesh, samples, side, points, color, stand_off=.012):
+    vertices = []
+    for y, z in points:
+        low, high, lip, shoulder, _ = _station(samples, y)
+        blend = min(1.0, max(0.0, (z - lip) / (shoulder - lip)))
+        x = side * (low + (high - low) * blend + stand_off)
+        vertices.append((x, y, z))
+    mesh.face(vertices[::side], color)
+
+
 def _driver_outline(parent, low, high, belt, roof, nose, windshield_base, windshield_top):
     mesh = _Mesh("driver outline")
     tint = _tint(WINDOW, 0.58)
@@ -116,6 +182,111 @@ def _driver_outline(parent, low, high, belt, roof, nose, windshield_base, windsh
     return driver
 
 
+def _plate(mesh, tail, z, kind):
+    plate = (0.74, 0.79, 0.68, 1)
+    ink = (0.13, 0.20, 0.22, 1)
+    pattern = {
+        "compact": ("110", "010", "011", "010", "111"),
+        "sport": ("111", "001", "011", "100", "111"),
+        "van": ("111", "101", "111", "001", "111"),
+        "police": ("101", "101", "111", "001", "001"),
+        "swat": ("111", "100", "111", "101", "111"),
+    }[kind]
+    mesh.box((0, tail - .060, z), (.204, .020, .065), BUMPER)
+    mesh.box((0, tail - .080, z), (.177, .008, .050), plate)
+    for digit, offset in ((("100", "100", "100", "101", "111"), -.112),
+                          (("111", "001", "011", "001", "111"), -.018), (pattern, .077)):
+        for row, pixels in enumerate(digit):
+            for column, pixel in enumerate(pixels):
+                if pixel == "1":
+                    x = offset + column * .0155
+                    low = z + .033 - row * .014
+                    y = tail - .090
+                    mesh.face(((x, y, low), (x + .013, y, low), (x + .013, y, low + .011),
+                               (x, y, low + .011)), ink)
+
+
+def _fascia(mesh, length, width, belt, kind):
+    for end in (-1, 1):
+        y = length * end
+        mesh.loft(((y - .087, width * .68, width * .74, -.012, .11),
+                   (y + .087, width * .68, width * .74, -.012, .11)), BUMPER)
+    grille_width = width * (.39 if kind in ("van", "swat") else .31)
+    grille_height = .091 if kind in ("van", "swat") else .057
+    grille_z = belt * .45
+    mesh.box((0, length + .030, grille_z), (grille_width, .021, grille_height), TRIM)
+    mesh.box((0, length + .054, grille_z), (grille_width * .89, .004, grille_height * .71), BUMPER)
+    for height in (-.48, 0.0, .48):
+        mesh.box((0, length + .061, grille_z + height * grille_height),
+                 (grille_width * .83, .005, .006), CHROME)
+    mesh.box((0, length + .067, grille_z + .003), (.034, .007, .028), CHROME)
+    for side in (-1, 1):
+        mesh.box((side * width * .49, -length - .083, .015), (.073, .016, .026), CHROME)
+        mesh.box((side * width * .49, -length - .103, .015), (.049, .009, .016), BUMPER)
+    _plate(mesh, -length, .13, kind)
+
+
+def _door_details(mesh, samples, side, length, belt, kind):
+    top, base = belt - .062, max(.021, belt - .301)
+    splits = (length * -.55, -.05, length * .43) if kind != "sport" else (-.79, .98)
+    groove = (0.058, 0.087, 0.10, 1)
+    for y in splits:
+        _side_detail(mesh, samples, side, ((y, base), (y + .012, base),
+                                           (y + .012, top), (y, top)), groove)
+    rear, front = splits[0], splits[-1]
+    _side_detail(mesh, samples, side, ((rear, base), (front, base), (front, base + .012), (rear, base + .012)),
+                 groove)
+    handles = (.39,) if kind == "sport" else (-.30, .38)
+    for y in handles:
+        _side_detail(mesh, samples, side, ((y - .08, top - .03), (y + .09, top - .03),
+                                           (y + .08, top), (y - .07, top)), TRIM, .021)
+    _side_detail(mesh, samples, side, ((rear + .03, base - .04), (front - .02, base - .04),
+                                       (front - .04, base - .017), (rear + .05, base - .017)), BUMPER)
+    if kind == "police":
+        center = belt * .54
+        _side_detail(mesh, samples, side, ((rear, center - .05), (front, center - .05),
+                                           (front - .10, center + .116), (rear + .16, center + .116)),
+                     (.60, .68, .71, 1), .019)
+        badge = ((.13, center + .077), (.21, center + .077), (.24, center + .038),
+                 (.17, center - .015), (.10, center + .038))
+        _side_detail(mesh, samples, side, badge[::-1], (.79, .58, .25, 1), .025)
+    elif kind == "van":
+        center = belt * .45
+        _side_detail(mesh, samples, side, ((-.99, center - .024), (.87, center - .024),
+                                           (.75, center + .034), (-.88, center + .034)),
+                     (.80, .76, .56, 1), .015)
+
+
+def _lamp_face(mesh, x, y, z, half_w, half_h, color, side):
+    chamfer = min(half_w, half_h) * .38
+    points = ((x - half_w + chamfer, y, z - half_h), (x + half_w - chamfer, y, z - half_h),
+              (x + half_w, y, z - half_h + chamfer), (x + half_w, y, z + half_h - chamfer),
+              (x + half_w - chamfer, y, z + half_h), (x - half_w + chamfer, y, z + half_h),
+              (x - half_w, y, z + half_h - chamfer), (x - half_w, y, z - half_h + chamfer))
+    mesh.face(points[::-side], color)
+
+
+def _upper_trim(mesh, profile, kind, width, length, hood_base, roof, color):
+    if kind in ("van", "swat"):
+        for side in (-1, 1):
+            rail = side * width * .54
+            mesh.box((rail, -.36, roof + .012), (.029, length * .39, .033), TRIM)
+        return
+    if kind != "sport":
+        return
+    start, end = hood_base + .09, length * .84
+    if start >= end:
+        return
+    for side in (-1, 1):
+        center = side * width * .44
+        for fraction in (.0, .19, .38):
+            y = start + (end - start) * fraction
+            lip = y + .055
+            z, high = _station(profile, y)[3] + .012, _station(profile, lip)[3] + .012
+            mesh.face(((center - .11, y, z), (center + .11, y, z),
+                       (center + .084, lip, high), (center - .098, lip, high)), _tint(color, .37))
+
+
 def _body_mesh(parent, spec, kind):
     width, length = spec["width"] / 2, spec["length"] / 2
     color = spec["color"]
@@ -132,32 +303,33 @@ def _body_mesh(parent, spec, kind):
         "police": (-0.52, 0.31),
         "swat": (-0.89, 0.42),
     }[kind]
-    rear_slope = 0.12 if is_van else 0.38
-    nose_slope = 0.26 if is_van else 0.49
+    rear_slope = 0.12 if is_van else .52 if kind == "sport" else .38
+    nose_slope = 0.26 if is_van else .67 if kind == "sport" else .49
     body = _Mesh("body")
-    body.loft((
+    profile = (
         (-length, width * 0.77, width * 0.82, 0.03, belt - 0.07),
         (-length + 0.20, width * 0.90, width * 0.98, -0.06, belt - 0.01),
         (-length * 0.62, width * 0.92, width, -0.06, belt),
         (length * 0.56, width * 0.91, width, -0.06, belt),
         (length - 0.18, width * 0.90, width * 0.91, -0.06, belt - 0.035),
         (length, width * 0.72, width * 0.80, 0.035, belt - 0.095),
-    ), color)
+    )
+    samples = _rolling_shell(body, profile, spec, color)
+    body.box((0, 0, -.14), (width * .70, length * .84, .073), BUMPER)
+    for axle_y in (-spec["wheelbase"] * .5, spec["wheelbase"] * .5):
+        body.box((0, axle_y, -.242), (width * .86, .125, .076), TRIM)
+    _fascia(body, length, width, belt, kind)
     for side in (-1, 1):
-        body.box((side * width * 0.965, 0.0, -0.025), (0.025, length * 0.53, 0.070), BUMPER)
-    for y in (-length, length):
-        body.box((0, y, 0.063), (width * 0.71, 0.045, 0.071), BUMPER)
-    body.box((0, length + 0.045, 0.067), (width * 0.32, 0.013, 0.037), TRIM)
-    body.box((0, -length - 0.045, 0.112), (0.19, 0.013, 0.065), (0.72, 0.77, 0.64, 1))
+        _door_details(body, samples, side, length, belt, kind)
     tail, nose = cabin_tail * length, cabin_nose * length
     low, high = width * 0.90, width * (0.84 if is_van else 0.69)
-    cabin = _Mesh("cab")
-    cabin.loft((
+    body.loft((
         (tail, low, low, belt - 0.01, belt + 0.015),
         (tail + rear_slope, low, high, belt - 0.01, roof),
         (nose, low, high, belt - 0.01, roof),
         (nose + nose_slope, low, low, belt - 0.01, belt + 0.015),
     ), _tint(color, 0.92))
+    _upper_trim(body, profile, kind, width, length, nose + nose_slope, roof, color)
     windows = _Mesh("windows")
     base_z, top_z = belt + .057, roof - .054
     slope_height = roof - belt - .015
@@ -166,12 +338,14 @@ def _body_mesh(parent, spec, kind):
     windshield_base = (nose + nose_slope * base_slope + .012, base_z)
     windshield_top = (nose + nose_slope * top_slope + .012, top_z)
     windows.face(((low * 0.89, *windshield_base), (-low * 0.89, *windshield_base),
-                  (-high * 0.91, *windshield_top), (high * 0.91, *windshield_top)), WINDOW)
+                  (-high * 0.91, *windshield_top), (high * 0.91, *windshield_top)), WINDOW,
+                 corner_colors=(GLASS_EDGE, GLASS_EDGE, GLASS_TOP, GLASS_TOP))
     rear_base = (tail + rear_slope * (1 - base_slope) - .012, base_z)
     rear_top = (tail + rear_slope * (1 - top_slope) - .012, top_z)
     if kind != "swat":
         windows.face(((-low * 0.86, *rear_base), (low * 0.86, *rear_base),
-                      (high * 0.91, *rear_top), (-high * 0.91, *rear_top)), WINDOW)
+                      (high * 0.91, *rear_top), (-high * 0.91, *rear_top)), WINDOW,
+                     corner_colors=(GLASS_EDGE, GLASS_EDGE, GLASS_TOP, GLASS_TOP))
     for side in (-1, 1):
         for y0, y1, top0, top1 in (
             (tail + 0.11, 0.0, tail + rear_slope + 0.095, -0.04),
@@ -182,18 +356,16 @@ def _body_mesh(parent, spec, kind):
                 body.box((side * (low + .018), -.83, belt + .22), (.028, .79, .13), armor)
                 body.box((side * (low + .05), -.83, belt + .23), (.007, .38, .022), (.68, .72, .63, 1))
                 continue
-            vertices = ((side * (low + 0.007), y0, belt + 0.035),
-                        (side * (low + 0.007), y1, belt + 0.035),
-                        (side * (high + 0.017), top1, roof - 0.062),
-                        (side * (high + 0.017), top0, roof - 0.062))
-            windows.face(vertices[::side], _tint(WINDOW, 0.83))
-        body.box((side * (width + 0.045), nose + 0.10, belt + 0.065),
-                 (0.10, 0.095, 0.046), BUMPER)
-        for y in (-0.32, 0.35):
-            body.box((side * (width - 0.015), y, belt - 0.074), (0.022, 0.12, 0.024), TRIM)
-        if kind == "police":
-            body.box((side * (width - 0.01), 0.0, belt - 0.12),
-                     (0.017, length * 0.55, 0.064), (0.74, 0.80, 0.80, 1))
+            low_z, high_z = belt + .042, roof - .061
+            low_x = low + (high - low) * ((low_z - belt + .01) / (roof - belt + .01)) + .015
+            high_x = low + (high - low) * ((high_z - belt + .01) / (roof - belt + .01)) + .015
+            vertices = ((side * low_x, y0, low_z), (side * low_x, y1, low_z),
+                        (side * high_x, top1, high_z), (side * high_x, top0, high_z))
+            tint = (GLASS_EDGE, GLASS_EDGE, _tint(GLASS_TOP, .82), _tint(GLASS_TOP, .82))
+            windows.face(vertices[::side], WINDOW, corner_colors=tint[::side])
+        body.box((side * (width + .012), nose + .102, belt + .071), (.102, .063, .049), BUMPER)
+        body.box((side * (width + .025), nose + .113, belt + .084), (.102, .045, .025), color)
+        body.box((side * (width + .026), nose + .035, belt + .072), (.067, .010, .025), CHROME)
     if emergency:
         body.box((0, -0.09, roof + 0.095), (width * 0.57, 0.115, 0.055), BUMPER)
         body.box((-width * 0.28, -0.09, roof + 0.125), (width * 0.22, 0.117, 0.048),
@@ -205,28 +377,47 @@ def _body_mesh(parent, spec, kind):
         body.box((0, -length - .10, .13), (width * .67, .084, .071), BUMPER)
         for side in (-1, 1):
             body.box((side * width * .72, length + .08, .20), (.061, .066, .21), BUMPER)
-    body_path = body.attach(parent, "paint")
-    cabin.attach(body_path, "cabin")
-    windows.attach(parent, "glass")
+    body_path = body.attach(parent, "paint and trim")
+    _finish(body_path, .37 if kind == "sport" else .46, .13)
+    _finish(windows.attach(parent, "glazing"), .26, .07)
     lamps = _Mesh("front-lamps")
     tails = _Mesh("tail-lamps")
     for side in (-1, 1):
-        lamps.box((side * width * 0.61, length - 0.004, belt - 0.115),
-                  (width * 0.19, 0.044, 0.052), (0.85, 0.89, 0.76, 1))
-        tails.box((side * width * 0.64, -length - 0.003, belt - 0.107),
-                  (width * 0.18, 0.037, 0.052), (0.80, 0.12, 0.06, 1))
+        head_x, tail_x = side * width * .602, side * width * .635
+        head_z, tail_z = belt - .132, belt - .139
+        head_h = .038 if kind == "sport" else .052 if not is_van else .061
+        for x, y, z, h, end in ((head_x, length + .007, head_z, head_h, 1),
+                                 (tail_x, -length - .007, tail_z, .057, -1)):
+            body_face = lamps if end == 1 else tails
+            casing = (0.27, .32, .32, 1) if end == 1 else (.27, .048, .032, 1)
+            lens = (.76, .84, .77, 1) if end == 1 else (.69, .074, .047, 1)
+            _lamp_face(body_face, x, y, z, width * .204, h, casing, end)
+            _lamp_face(body_face, x, y + end * .007, z, width * .179, h * .76, lens, end)
+            accent = (.99, .95, .79, 1) if end == 1 else (.95, .22, .104, 1)
+            _lamp_face(body_face, x, y + end * .014, z + h * .30, width * .157, h * .17, accent, end)
     silhouette = _driver_outline(parent, low, high, belt, roof, nose, windshield_base, windshield_top)
     return body_path, lamps.attach(parent, "headlamps"), tails.attach(parent, "taillamps"), silhouette
 
 
-def _wheel_mesh(parent, radius, width):
+@lru_cache(maxsize=16)
+def _wheel_model(radius, width, kind):
     mesh = _Mesh("tread-and-alloy")
     rings = [
-        (-width * 0.53, radius * 0.66), (-width * 0.58, radius * 0.86),
+        (-width * 0.53, radius * 0.66), (-width * 0.58, radius * 0.83),
         (-width * 0.42, radius), (width * 0.42, radius),
-        (width * 0.58, radius * 0.86), (width * 0.53, radius * 0.66),
+        (width * 0.58, radius * 0.83), (width * 0.53, radius * 0.66),
     ]
-    steps = 12
+    steps = 16
+    spokes, alloy = {
+        "compact": (6, (.50, .57, .59, 1)), "sport": (10, (.61, .66, .66, 1)),
+        "van": (5, (.36, .41, .42, 1)), "police": (8, (.27, .34, .37, 1)),
+        "swat": (6, (.27, .31, .31, 1)),
+    }[kind]
+    pocket = (0.09, 0.12, 0.13, 1)
+
+    def rim_vertex(side, offset, size, angle):
+        return (side * width * offset, radius * size * math.cos(angle), radius * size * math.sin(angle))
+
     for index in range(steps):
         theta = math.tau * index / steps
         phi = math.tau * (index + 1) / steps
@@ -237,13 +428,31 @@ def _wheel_mesh(parent, radius, width):
                        (b, rb * math.cos(phi), rb * math.sin(phi)),
                        (b, rb * math.cos(theta), rb * math.sin(theta))), color)
         for side in (-1, 1):
-            x, r = side * width * 0.54, radius * 0.66
-            vertices = (
-                (x, 0, 0), (x, r * math.cos(theta), r * math.sin(theta)),
-                (x, r * math.cos(phi), r * math.sin(phi)),
-            )
-            mesh.face(vertices[::side], RIM if index % 2 else TRIM)
-    mesh.attach(parent, "wheel-visual")
+            outer = (rim_vertex(side, .534, .66, theta), rim_vertex(side, .534, .66, phi),
+                     rim_vertex(side, .570, .563, phi), rim_vertex(side, .570, .563, theta))
+            mesh.face(outer[::side], alloy)
+            back = ((side * width * .536, 0, 0), rim_vertex(side, .536, .564, theta),
+                    rim_vertex(side, .536, .564, phi))
+            mesh.face(back[::side], pocket)
+            hub = ((side * width * .595, 0, 0), rim_vertex(side, .595, .227, theta),
+                   rim_vertex(side, .595, .227, phi))
+            mesh.face(hub[::side], _tint(alloy, .77))
+    for index in range(spokes):
+        turn = math.tau * index / spokes
+        for side in (-1, 1):
+            spoke = (rim_vertex(side, .574, .196, turn - .22),
+                     rim_vertex(side, .574, .568, turn - .088),
+                     rim_vertex(side, .574, .568, turn + .072),
+                     rim_vertex(side, .574, .196, turn + .20))
+            mesh.face(spoke[::side], alloy)
+    template = NodePath("shared wheel geometry")
+    wheel = mesh.attach(template, f"{kind}-rim")
+    _finish(wheel, .69, .05)
+    return wheel
+
+
+def _wheel_mesh(parent, radius, width, kind):
+    _wheel_model(radius, width, kind).instance_to(parent)
 
 
 class Vehicle:
@@ -385,7 +594,7 @@ class Vehicle:
         y = spec["wheelbase"] * (0.5 if is_front else -0.5)
         wheel_node = self.render.attachNewNode(f"{self.kind}-wheel")
         wheel_node.setPos(self.render.getRelativePoint(self.node, Point3(x, y, -0.32)))
-        _wheel_mesh(wheel_node, spec["wheel_radius"], spec["wheel_width"])
+        _wheel_mesh(wheel_node, spec["wheel_radius"], spec["wheel_width"], self.kind)
         wheel = self.chassis.createWheel()
         wheel.setNode(wheel_node.node())
         wheel.setChassisConnectionPointCs(Point3(x, y, 0.02))

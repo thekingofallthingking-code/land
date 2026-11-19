@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ASSET_DIR = PROJECT_ROOT / "assets_generated"
 SAMPLE_RATE = 44_100
-AUDIO_VERSION = b"6\n"
+AUDIO_VERSION = b"7\n"
 Audio = NDArray[np.float64]
 
 
@@ -242,6 +242,14 @@ _AUDIO = {
                            round(.50 * SAMPLE_RATE), 1, .93),
     "weapon-rifle.wav": (partial(_arcade_report, seed=313, tone=89, decay=24, weight=.9),
                          round(.30 * SAMPLE_RATE), 1, .91),
+    "weapon-burst.wav": (partial(_arcade_report, seed=820, tone=127, decay=39, weight=.58),
+                         round(.18 * SAMPLE_RATE), 1, .87),
+    "weapon-revolver.wav": (partial(_arcade_report, seed=961, tone=67, decay=14, weight=1.23),
+                            round(.43 * SAMPLE_RATE), 1, .94),
+    "weapon-drum.wav": (partial(_arcade_report, seed=152, tone=84, decay=18, weight=1.00),
+                        round(.35 * SAMPLE_RATE), 1, .92),
+    "weapon-marksman.wav": (partial(_arcade_report, seed=415, tone=98, decay=15.8, weight=.86),
+                            round(.48 * SAMPLE_RATE), 1, .92),
     "weapon-melee.wav": (_swing, round(.21 * SAMPLE_RATE), 1, .66),
     "weapon-dry.wav": (partial(_gear_click, offsets=(0,)), round(.09 * SAMPLE_RATE), 1, .52),
     "weapon-reload.wav": (partial(_gear_click, offsets=(0, .117, .235)),

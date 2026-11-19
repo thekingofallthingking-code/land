@@ -59,7 +59,7 @@ class Collision:
         self.body.addShape(hull)
 
 
-def _coast(mesh, collision, ix, iy):
+def _coast(mesh, glow, collision, ix, iy):
     edge = ROAD_HALF_WIDTH - .4
     inner = -ROAD_HALF_WIDTH
     length = CHUNK_SIZE + (2 * ROAD_HALF_WIDTH if ix == CHUNK_MAX else 0)
@@ -80,15 +80,44 @@ def _coast(mesh, collision, ix, iy):
         collision.box(center, size)
         mesh.slab(x - .16, inner, x + .16, inner + length, 1.06, (.66, .64, .54))
     if iy == CHUNK_MIN:
-        for offset, tint in ((11, (.34, .57, .60)), (18, (.28, .49, .55)),
-                             (30, (.25, .45, .52)), (51, (.23, .42, .49))):
-            for x in (2, 36, 71, 102):
-                mesh.slab(x, -offset, x + 25, -offset + .22, -.38, tint)
-    if ix == CHUNK_MAX:
-        for offset in (12, 21, 38, 57):
-            for y in (6, 37, 71, 107):
-                mesh.slab(CHUNK_SIZE + offset, y, CHUNK_SIZE + offset + .17,
-                          y + 23, -.38, (.29, .48, .53))
+        _seawall_rocks(mesh)
+        if ix % 3 == 0:
+            _channel_buoy(mesh, glow, 92, -39.5)
+    if ix == CHUNK_MAX and -5 <= iy <= 3 and iy % 2 == 0:
+        _dock_piles(mesh)
+
+
+def _seawall_rocks(mesh):
+    stone = ((.27, .32, .31), (.35, .34, .30), (.27, .29, .30))
+    for index, x in enumerate(range(-7, CHUNK_SIZE - 7, 4)):
+        y = -10.6 - (index % 4) * .64
+        base = 1.65 + ((index * 7) % 5) * .19
+        mesh.cone(x, y, -.49, .47 + .17 * (index % 3), base, base * .58,
+                  stone[index % len(stone)], 5 + index % 2)
+
+
+def _channel_buoy(mesh, glow, x, y):
+    orange = (.69, .31, .14)
+    mesh.cone(x, y, -.55, .56, .74, .54, orange, 8)
+    mesh.cone(x, y, .01, .26, .53, .36, (.91, .66, .31), 8)
+    mesh.cone(x, y, .27, .55, .36, .08, orange, 6)
+    mesh.box((x, y, .86), (.22, .22, .16), (.40, .32, .21))
+    glow.cone(x, y, .93, .12, .104, .104, (1.0, .55, .20), 7)
+
+
+def _dock_piles(mesh):
+    start = CHUNK_SIZE + ROAD_HALF_WIDTH - .04
+    finish = start + 17.8
+    timber = (.47, .36, .27)
+    mesh.box(((start + finish) * .5, 56, .075), (17.8, 6.36, .21), timber)
+    for i in range(22):
+        x = start + .34 + i * .79
+        mesh.slab(x, 52.88, x + .04, 59.12, .187, (.37, .29, .24))
+    for x in (start + 1, start + 6.1, start + 11.3, finish - .52):
+        for y in (52.74, 59.26):
+            mesh.cone(x, y, -.92, 1.96, .28, .24, (.37, .30, .26), 6)
+            mesh.cone(x, y, .93, .14, .248, .238, (.76, .66, .50), 6)
+    mesh.box((finish - .43, 56, .51), (.4, 6.48, .22), (.58, .49, .36))
 
 
 class City:
@@ -241,7 +270,7 @@ class City:
             for x, y, side in ((-10.2, 10.2, "north"), (10.2, -10.2, "south"),
                                (10.2, 10.2, "east"), (-10.2, -10.2, "west")):
                 traffic_signal(surface, signal_meshes, x, y, side)
-        _coast(surface, collision, ix, iy)
+        _coast(surface, glow, collision, ix, iy)
         surface.node().reparentTo(root)
         glow_node = glow.node()
         glow_node.reparentTo(root)

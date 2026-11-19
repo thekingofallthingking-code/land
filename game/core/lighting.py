@@ -1,6 +1,8 @@
 """Coastal sky, moving sunlight and a small HDR bloom pass."""
 import math
 
+import numpy as np
+
 from panda3d.core import (
     AmbientLight, BitMask32, CullBinManager, DepthTestAttrib, DirectionalLight,
     Fog, FrameBufferProperties, Geom, GeomNode,
@@ -9,6 +11,7 @@ from panda3d.core import (
 )
 
 from game.core.city_shader import city_shader
+from game.core.water_shader import water_shader
 
 START_HOUR = 16.37
 DAY_SECONDS = 1080.0
@@ -34,6 +37,7 @@ uniform vec3 horizon;
 uniform vec3 zenith;
 uniform float darkness;
 uniform float clock_angle;
+uniform float storm;
 in vec3 ray;
 out vec4 result;
 float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -57,12 +61,15 @@ void main() {
     cloud.x += sin(clock_angle * 0.25) * 2.0;
     float cloud_noise = noise2(cloud) * 0.64 + noise2(cloud*2.15+0.72)*0.24 + noise2(cloud*4.4)*0.12;
     float wisps = smoothstep(0.53, 0.80, cloud_noise) * smoothstep(0.012, 0.15, up);
-    vec3 paper = mix(vec3(0.43, 0.26, 0.22), vec3(0.038, 0.052, 0.072), darkness);
-    color = mix(color, paper, wisps * 0.60);
+    vec3 cloud_light = mix(vec3(0.72, 0.62, 0.54), vec3(0.044, 0.058, 0.087), darkness);
+    cloud_light += vec3(0.26, 0.077, 0.019) * pow(sun, 5.0) * (1.0 - darkness);
+    float bank = smoothstep(0.46, 0.70, cloud_noise + storm * 0.09) * smoothstep(0.02, 0.16, up);
+    vec3 cloud_base = mix(cloud_light, vec3(0.095, 0.12, 0.17), storm);
+    color = mix(color, cloud_base, max(wisps * 0.48, bank * (0.29 + storm * 0.48)));
     vec2 stars = vec2(atan(d.y,d.x)*106.0, d.z*210.0);
     float star = step(0.996, hash2(floor(stars))) *
                  (1.0-smoothstep(0.05,0.32,length(fract(stars)-0.5)));
-    color += star * 0.5 * darkness * smoothstep(0.12,0.42,up);
+    color += star * 0.5 * darkness * (1.0 - bank) * (1.0 - storm) * smoothstep(0.12,0.42,up);
     result = vec4(color,1.0);
 }
 """
@@ -105,7 +112,9 @@ out vec4 result;
 void main() {
     vec3 c = (texture(tex, uv).rgb + texture(bloom_tex, uv).rgb * 0.40) * exposure;
     c = clamp((c*(2.51*c+0.03))/(c*(2.43*c+0.59)+0.14), 0.0, 1.0);
-    float vignette = 1.0-0.13*dot((uv-0.5)*1.4,(uv-0.5)*1.4);
+    float luminance = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = clamp(mix(vec3(luminance), c, 1.14), 0.0, 1.0);
+    float vignette = 1.0-0.075*dot((uv-0.5)*1.4,(uv-0.5)*1.4);
     result = vec4(pow(c,vec3(1.0/2.2)) * vignette,1.0);
 }
 """
@@ -148,6 +157,28 @@ def sky_mesh(parent):
     return sky
 
 
+
+def surface_grain():
+    """Bake repeating fine grain and broad stone/asphalt variation."""
+    rng = np.random.default_rng(871)
+    size = 128
+    fine = rng.random((size, size))
+    broad = rng.random((size, size))
+    for _ in range(6):
+        broad = (broad * 2 + np.roll(broad, 1, 0) + np.roll(broad, -1, 0)
+                 + np.roll(broad, 1, 1) + np.roll(broad, -1, 1)) / 6
+    broad = np.clip((broad - broad.mean()) * 3.7 + .5, 0, 1)
+    pixels = (np.stack((fine, broad, np.zeros_like(fine)), axis=-1) * 255).astype(np.uint8)
+    texture = Texture("coastal surface grain")
+    texture.setup_2d_texture(size, size, Texture.T_unsigned_byte, Texture.F_rgb8)
+    texture.set_ram_image_as(pixels.tobytes(), "RGB")
+    texture.generate_ram_mipmap_images()
+    texture.set_wrap_u(SamplerState.WM_repeat)
+    texture.set_wrap_v(SamplerState.WM_repeat)
+    texture.set_minfilter(SamplerState.FT_linear_mipmap_linear)
+    texture.set_magfilter(SamplerState.FT_linear)
+    return texture
+
 def mix(a, b, t):
     return a * (1 - t) + b * t
 
@@ -159,6 +190,8 @@ class CityLighting:
         self.night = 0.0
         self.rendered = rendered
         self.pipeline = None
+        self.wave_clock = 0.0
+        self.wetness = 0.0
         if not rendered:
             return
         import simplepbr
@@ -193,6 +226,13 @@ class CityLighting:
         self.city_root = city_root
         city_root.set_shader(city_shader())
         city_root.set_shader_input("sun_shadows", self.shadow_active)
+        city_root.set_shader_input("surface_detail", bool(preset["shadow"]))
+        city_root.set_shader_input("surface_grain", surface_grain())
+        city_root.set_shader_input("shadow_softness", 1.35 if preset["shadow"] >= 2048 else 0.0)
+        self.water = city_root.find("Bay surface")
+        if not self.water.is_empty():
+            self.water.set_shader(water_shader())
+            self.water.hide(SHADOW_MASK)
         if preset["shadow"]:
             self._init_bloom()
 
@@ -230,28 +270,46 @@ class CityLighting:
         moon_direction = Vec3(-sun_direction.x, -.27, -sun_direction.z + .14)
         moon_direction.normalize()
         golden = max(0.0, 1.0 - abs(day) * 1.65)
-        sunlight = max(0.0, min(1.65, (day + .09) * 3.7)) * (1 - .67 * weather)
+        sunlight = max(0.0, min(1.78, (day + .09) * 3.7)) * (1 - .67 * weather)
         show_shadow = bool(self.shadow_size and sunlight > .01)
         if show_shadow != self.shadow_active:
             self.sun.node().set_shadow_caster(show_shadow, self.shadow_size, self.shadow_size)
             self.shadow_active = show_shadow
             self.city_root.set_shader_input("sun_shadows", show_shadow)
-        sun_color = mix(Vec3(1.0, .87, .70), Vec3(1.0, .43, .24), golden)
+        sun_color = mix(Vec3(1.0, .88, .72), Vec3(1.0, .47, .23), golden)
         self.sun.node().set_color(Vec4(*(sun_color * sunlight), 1))
         self.sun.set_pos(focus + sun_direction * 155)
         self.sun.look_at(focus)
         self.moon.look_at(-moon_direction)
         self.moon.node().set_color(Vec4(.10 * self.night, .17 * self.night, .33 * self.night, 1))
-        ambient = mix(Vec3(.39, .43, .48), Vec3(.13, .17, .28), self.night)
+        ambient = mix(Vec3(.34, .41, .49), Vec3(.10, .145, .25), self.night)
         ambient = mix(ambient, Vec3(.21, .27, .36), weather * .58)
         self.ambient.node().set_color(Vec4(*ambient, 1))
-        horizon = mix(Vec3(.39, .55, .64), Vec3(.50, .25, .19), golden)
+        horizon = mix(Vec3(.40, .61, .75), Vec3(.57, .31, .21), golden)
         horizon = mix(horizon, Vec3(.065, .102, .17), self.night)
-        zenith = mix(Vec3(.105, .275, .46), Vec3(.014, .025, .068), self.night)
+        zenith = mix(Vec3(.055, .195, .40), Vec3(.010, .021, .062), self.night)
         horizon = mix(horizon, Vec3(.17, .22, .28), weather * .77)
         zenith = mix(zenith, Vec3(.09, .12, .19), weather * .69)
-        self.fog.set_exp_density(.00175 + weather * .0026)
-        self.fog.set_color(*horizon)
+        haze_density = .00135 + weather * .0028
+        self.fog.set_exp_density(haze_density)
+        self.fog.set_color(*(horizon * .88))
+        self.wave_clock += dt
+        if weather >= self.wetness:
+            self.wetness = weather
+        else:
+            self.wetness = max(weather, self.wetness - dt * .055)
+        self.city_root.set_shader_input("wetness", self.wetness)
+        self.city_root.set_shader_input("harbor_eye", camera_position)
+        self.city_root.set_shader_input("reflected_sky", mix(horizon, zenith, .29))
+        self.city_root.set_shader_input("coastal_sun", sun_direction)
+        self.city_root.set_shader_input("sun_strength", sunlight)
+        if not self.water.is_empty():
+            sun_edge = max(0.0, min(1.0, (sun_direction.z + .09) / .12))
+            self.water.set_shader_input("sun_visible", sun_edge * sun_edge * (3 - 2 * sun_edge))
+            self.water.set_shader_input("coastal_horizon", horizon)
+            self.water.set_shader_input("haze_density", haze_density)
+            self.water.set_shader_input("wave_clock", self.wave_clock)
+            self.water.set_shader_input("darkness", self.night)
         self.sky.set_pos(camera_position)
         self.sky.set_shader_input("sun_dir", sun_direction)
         self.sky.set_shader_input("moon_dir", moon_direction)
@@ -259,6 +317,7 @@ class CityLighting:
         self.sky.set_shader_input("zenith", zenith)
         self.sky.set_shader_input("darkness", self.night)
         self.sky.set_shader_input("clock_angle", angle)
+        self.sky.set_shader_input("storm", weather)
         return self.night
 
     def close(self):

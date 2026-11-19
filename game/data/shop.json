@@ -36,6 +36,30 @@
       "price": 330,
       "rounds": 4,
       "ammo_price": 85
+    },
+    {
+      "weapon": "burst",
+      "price": 160,
+      "rounds": 24,
+      "ammo_price": 32
+    },
+    {
+      "weapon": "revolver",
+      "price": 185,
+      "rounds": 18,
+      "ammo_price": 35
+    },
+    {
+      "weapon": "drum",
+      "price": 315,
+      "rounds": 24,
+      "ammo_price": 65
+    },
+    {
+      "weapon": "marksman",
+      "price": 340,
+      "rounds": 15,
+      "ammo_price": 65
     }
   ],
   "armor_price": 55

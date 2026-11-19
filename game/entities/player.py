@@ -146,10 +146,9 @@ class _Rig:
         shoulder = self.torso.attach_new_node(f"shoulder {side}")
         shoulder.set_pos(side * .222, 0, .447)
         sleeve = _Part(shoulder, "upper sleeve")
-        sleeve.rings(0, 0, ((-.286, .064, .061, 0), (-.193, .077, .071, 0),
-                            (-.047, .084, .082, 0), (.045, .065, .073, 0)), _SLEEVE)
-        sleeve.rings(0, 0, ((-.091, .083, .078, 0), (-.043, .087, .085, 0),
-                            (.045, .066, .075, 0)), _JACKET_TOP)
+        seam = (-.088, .084, .079, 0)
+        sleeve.rings(0, 0, ((-.286, .064, .061, 0), (-.193, .077, .071, 0), seam), _SLEEVE)
+        sleeve.rings(0, 0, (seam, (-.043, .087, .085, 0), (.045, .066, .075, 0)), _JACKET_TOP)
         sleeve.finish()
         elbow = shoulder.attach_new_node("elbow")
         elbow.set_z(-.272)

@@ -4,7 +4,7 @@ Harbor City is an original, low-poly 3D action and driving game in a 2.3 × 2.3 
 
 ## Windows 10 or 11 x64
 
-1. Extract the HarborCity folder to `C:\Projects\HarborCity`.
+1. Extract the game to `C:\Projects\HarborCity`. The folder should contain `setup.bat` and `run.bat`.
 2. Double-click `setup.bat`. It downloads and checks a project-local Python runtime and installs the pinned packages from official sources. First setup requires network access. Setup writes `logs\setup.log`.
 3. Double-click `run.bat` and choose **Play**. Use **Settings** to select Low, Medium or High and remap controls. Restart to apply a graphics preset.
 4. Run `test.bat` for unit tests and a bounded 65-second offscreen replay. Run `diag.bat` for environment, dependency and graphics diagnostics in `logs\diag.log`.
@@ -23,6 +23,9 @@ Harbor City is an original, low-poly 3D action and driving game in a 2.3 × 2.3 
 | R | Reload |
 | 1–5 | Pistol, SMG, shotgun, rifle, melee |
 | 6 / 7 | Grenade or rocket launcher once purchased |
+| 8 / 9 | Tideglass Compact / Iron Buoy once purchased |
+| 0 / - | Riptide Drum / Farline Scout once purchased |
+| Q | Cycle owned weapons |
 | C | Switch vehicle camera |
 | Esc | Close a panel or pause |
 | F1 / F3 / F5 | Controls, debug readout, quicksave |
@@ -31,7 +34,7 @@ Use **Save / Load** for three manual slots. Quick saves are separate. Saves reta
 
 ## The city
 
-Tideway Supply is north of the starting car. E opens the shop, and number keys buy guns, ammunition or armor there. Cash and dropped weapons are picked up on foot. Defeat returns you to Breakwater Clinic. An arrest clears the pursuit and releases you on Breakwater Avenue after a fine.
+Tideway Supply is north of the starting car. E opens the shop. Use the displayed item keys to buy weapons, ammunition or armor. The expanded shop stocks a three-shot burst sidearm, heavy revolver, automatic scattergun, and precision rifle with aim zoom. Cash and dropped weapons are picked up on foot. Defeat returns you to Breakwater Clinic. An arrest clears the pursuit and releases you on Breakwater Avenue after a fine.
 
 Witnessed crimes add wanted stars. Police pursue the reported location, deploy foot officers and set roadblocks. Breaking sight starts a search, followed by cooldown. At four stars tactical vans join. At five stars a helicopter searches with a spotlight. When sight is lost, follow the minimap marker to Lantern Lockup in Foundry Docks and press E inside the bay to lay low. Active objectives and destinations appear on the HUD and minimap.
 
@@ -59,4 +62,4 @@ timeout 95s .venv/bin/python game/tools/launch.py test
 timeout 98s .venv/bin/python game/tools/launch.py test-rendered
 ```
 
-Game assets are procedural. `docs/architecture.md` maps the runtime and `docs/SECTION_3.md` records the final-section specification.
+Medium and High add material grain and wet-street highlights, and High adds softer sun shadows. All presets use the animated bay surface and new vehicle and city models. Game assets are procedural. `docs/architecture.md` maps the runtime and `docs/SECTION_3.md` records the final-section specification.

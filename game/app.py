@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 import logging
 import os
+from math import exp
 from pathlib import Path
 from time import perf_counter
 
@@ -19,7 +20,7 @@ from game.ai.police import PoliceFleet
 from game.ai.traffic import Traffic
 from game.ai.witnesses import clear_sight, witnesses_for
 from game.core.camera import ThirdPersonCamera
-from game.core.config import ACTION_LABELS, ASSETS, PRESETS, ROOT, Settings, memory_gib, pick_quality, project_file, read_json, rebind
+from game.core.config import ACTION_LABELS, ASSETS, PRESETS, ROOT, WEAPON_KEYS, Settings, memory_gib, pick_quality, project_file, read_json, rebind
 from game.core.events import EventBus
 from game.core.lighting import CityLighting
 from game.core.performance import PerformanceLog
@@ -41,7 +42,7 @@ STEP = 1 / 60
 SETTINGS_FILE = ROOT / "settings.json"
 SAVE_FILE = ROOT / "save.json"
 MAX_STOLEN_CARS = 12
-SLOTS = tuple(range(1, 8))
+DEFAULT_HORIZONTAL_FOV = 76
 
 
 @dataclass
@@ -58,6 +59,7 @@ class Controls:
     fire_pressed: bool = False
     reload: bool = False
     weapon_slot: int = 0
+    cycle_weapon: bool = False
 
 
 @dataclass
@@ -101,6 +103,7 @@ class HarborCity(ShowBase):
         self.binding_action = None
         self.bound_controls = set()
         self.last_frame_time = None
+        self.horizontal_fov = DEFAULT_HORIZONTAL_FOV
         self.pointer_centered = False
         self.keys: set[str] = set()
         self.pressed: set[str] = set()
@@ -119,7 +122,7 @@ class HarborCity(ShowBase):
         if self.headless:
             self.camera = self.render.attach_new_node("simulated camera")
         else:
-            self.camLens.set_fov(76)
+            self.camLens.set_fov(self.horizontal_fov)
             self.camLens.set_near(0.19)
 
         renderer = self.win.get_gsg().get_driver_renderer() if self.win else ""
@@ -184,6 +187,7 @@ class HarborCity(ShowBase):
         self.delivery = DeliveryJob(self.render, self.city, self.events)
         self.activities = Activities(self.render, self.city, self.events, self.peds, self.player)
         self.store = read_json(ROOT / "game/data/shop.json")
+        self.shop_stock = {WEAPON_SPECS[offer["weapon"]].slot: offer for offer in self.store["offers"]}
         self.held_model = None
         self.refresh_held_model()
         self.events.subscribe("weapon_hit", self.on_weapon_hit)
@@ -238,7 +242,7 @@ class HarborCity(ShowBase):
         for key in self.bound_controls:
             self.ignore(key)
             self.ignore(key + "-up")
-        self.bound_controls = set(self.settings.bindings.values()) | {str(slot) for slot in SLOTS}
+        self.bound_controls = set(self.settings.bindings.values()) | set(WEAPON_KEYS.values())
         self.keys.clear()
         self.pressed.clear()
         for key in self.bound_controls:
@@ -297,6 +301,7 @@ class HarborCity(ShowBase):
         self.game_state = state
         if state != "playing":
             self.end_conversation()
+            self.weapons.cancel_burst()
         self.keys.clear()
         self.pressed.clear()
         self.jump_queued = False
@@ -365,7 +370,8 @@ class HarborCity(ShowBase):
             fire=keys["fire"] in self.keys,
             fire_pressed=keys["fire"] in self.pressed,
             reload=keys["reload"] in self.pressed,
-            weapon_slot=next((slot for slot in SLOTS if str(slot) in self.pressed), 0),
+            weapon_slot=next((slot for slot, key in WEAPON_KEYS.items() if key in self.pressed), 0),
+            cycle_weapon=keys["cycle_weapon"] in self.pressed,
         )
         self.pressed.clear()
         return controls
@@ -694,14 +700,14 @@ class HarborCity(ShowBase):
         return self.conversation.is_shopkeeper and self.conversation.mood not in ("afraid", "angry")
 
     def shop_offer(self, slot):
-        offer = self.store["offers"][slot - 1 if slot < 5 else slot - 2]
+        offer = self.shop_stock[slot]
         owned = self.weapons.owns(offer["weapon"])
         name = WEAPON_SPECS[offer["weapon"]].name
         label = f'{name}  +{offer["rounds"]} ammo' if owned else name
         return offer, owned, label, offer["ammo_price"] if owned else offer["price"]
 
     def shop_rows(self):
-        rows = [(str(slot), label, f"${price}") for slot in (1, 2, 3, 4, 6, 7)
+        rows = [(WEAPON_KEYS[slot], label, f"${price}") for slot in sorted(self.shop_stock)
                 for _, _, label, price in (self.shop_offer(slot),)]
         armor_price = self.store["armor_price"]
         rows.insert(4, ("5", "Body armor", "Full" if self.player.armor >= 100 else f"${armor_price}"))
@@ -746,7 +752,11 @@ class HarborCity(ShowBase):
             if controls.camera:
                 self.follow_camera.toggle_vehicle_view()
         elif not self.theft:
-            if controls.weapon_slot and self.weapons.select(controls.weapon_slot):
+            slot = controls.weapon_slot
+            if controls.cycle_weapon and not slot:
+                owned = sorted(spec.slot for spec in WEAPON_SPECS.values() if self.weapons.owns(spec.id))
+                slot = next((number for number in owned if number > self.weapons.selected.slot), owned[0])
+            if slot and self.weapons.select(slot):
                 self.refresh_held_model()
             if controls.reload:
                 self.weapons.reload()
@@ -788,11 +798,13 @@ class HarborCity(ShowBase):
 
     def update_simulation(self, dt, controls, *, advance_clock=True):
         self.weapons.update(dt)
+        if not self.player.active or self.conversation or self.theft:
+            self.weapons.cancel_burst()
         if advance_clock and self.theft is not None:
             self.update_carjacking(dt)
         if not self.occupied:
             can_move = not self.conversation and not self.theft
-            firing = advance_clock and can_move and self.player.active and (controls.fire or self.fire_queued)
+            firing = advance_clock and can_move and self.player.active and (controls.fire or self.fire_queued or self.weapons.burst_pending)
             self.player.move(controls.forward if can_move else 0, controls.side if can_move else 0,
                              self.follow_camera.heading, controls.sprint, self.jump_queued and can_move, dt,
                              aiming=self.aiming or firing)
@@ -887,6 +899,11 @@ class HarborCity(ShowBase):
             self.crowd_level += (volume - self.crowd_level) * min(1, live_dt * 2.6)
             self.crowd.set_volume(self.crowd_level)
         if self.overlay:
+            aim_fov = self.weapons.selected.aim_fov if self.aiming else None
+            target_fov = aim_fov or DEFAULT_HORIZONTAL_FOV
+            if abs(self.horizontal_fov - target_fov) > .03:
+                self.horizontal_fov += (target_fov - self.horizontal_fov) * (1 - exp(-11 * min(dt, .10)))
+                self.camLens.set_fov(self.horizontal_fov)
             vehicle = self.occupied
             context = self.context_prompt()
             speed, rpm, gear = (vehicle.speed_kph, vehicle.rpm, vehicle.gear) if vehicle else (0, 0, "")
@@ -907,6 +924,7 @@ class HarborCity(ShowBase):
                 f"{len(self.police.vehicles) + len(self.foot_police.officers) + self.police.air_count} police",
                 driving=vehicle is not None, car_health=vehicle.health if vehicle else 100,
                 armor=self.player.armor, weapon=self.weapons.selected.name, ammo=ammo, reserve=reserve,
+                weapon_slot=self.weapons.selected.slot,
                 reloading=self.weapons.reload_remaining > 0, aiming=self.aiming,
                 objective=objective, waypoint=landmark,
                 gps_route=self.activities.route(focus),

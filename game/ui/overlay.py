@@ -12,7 +12,7 @@ from panda3d.core import (
     TransparencyAttrib,
 )
 
-from game.core.config import PRESETS
+from game.core.config import PRESETS, WEAPON_KEYS
 
 PAPER = (0.96, 0.95, 0.88, 1)
 PALE = (0.76, 0.83, 0.80, 1)
@@ -404,7 +404,7 @@ class Overlay:
             )),
             (.327, "COMBAT", (
                 ("RMB", "Aim", "aim"), ("LMB", "Attack", "fire"), ("R", "Reload", "reload"),
-                ("1-7", "Select weapon", ""),
+                ("1-9,0,-", "Select weapon", ""), ("Q", "Next weapon", "cycle_weapon"),
             )),
         )
         self.help_keys = {}
@@ -518,6 +518,8 @@ class Overlay:
         self._update_help_keys(bindings)
         self.fire_key = self._control_label(bindings.get("fire", "mouse1"))
         self.reload_key = self._control_label(bindings.get("reload", "r"))
+        cycle_key = self._control_label(bindings.get("cycle_weapon", "q"))
+        _set_text(self.cycle_hint, f"{cycle_key}  NEXT")
         talk_key = self._control_label(bindings.get("talk", "e"))
         for prompt in (self.dialogue_exit, self.shop_exit):
             _set_text(prompt, f"{talk_key}  CLOSE")
@@ -586,10 +588,16 @@ class Overlay:
         _panel(parent, "weapon backdrop", -.500, -.048, .048, .271, DARK)
         _panel(parent, "weapon stripe", -.500, -.048, .266, .271, ORANGE)
         self.weapon_name = _text(parent, "", -.459, .213, .042, PAPER, self.sans, mutable=True)
-        _text(parent, "1-7", -.074, .214, .032, MINT, self.mono, align=TextNode.A_right)
+        self.weapon_hotkey = parent.attach_new_node("selected weapon key", 1)
+        _panel(self.weapon_hotkey, "weapon key backdrop", -.111, -.064, .203, .247, CONTROL_DARK)
+        self.weapon_key = _text(self.weapon_hotkey, "", -.0875, .213, .032, MINT, self.mono,
+                                align=TextNode.A_center, mutable=True)
+        self.weapon_hotkey.hide()
         self.ammo_text = _text(parent, "", -.459, .101, .082, PAPER, self.mono, mutable=True)
         self.ammo_status = _text(parent, "", -.074, .168, .030, ORANGE, self.mono,
                                  align=TextNode.A_right, mutable=True)
+        self.cycle_hint = _text(parent, "Q  NEXT", -.074, .064, .030, PALE, self.mono,
+                                align=TextNode.A_right, mutable=True)
 
         bars = ((-.024, -.010, -.002, .002), (.010, .024, -.002, .002),
                 (-.002, .002, -.024, -.010), (-.002, .002, .010, .024),
@@ -625,21 +633,26 @@ class Overlay:
         self.dialogue_exit = _text(self.dialogue, "E  CLOSE", .541, .283, .031, ORANGE, self.mono,
                                    align=TextNode.A_right, mutable=True)
 
-        _panel(self.shop, "shop backdrop", -.606, .606, .250, 1.164, DARK)
-        _panel(self.shop, "shop stripe", -.606, .606, 1.156, 1.164, ORANGE)
-        self.shop_speaker = _text(self.shop, "", -.564, 1.080, .060, MINT, self.sans, mutable=True)
-        self.shop_line = _text(self.shop, "", -.564, 1.005, .041, PAPER, self.sans, mutable=True, wrap=27)
+        _panel(self.shop, "shop backdrop", -.872, .872, .250, 1.164, DARK)
+        _panel(self.shop, "shop stripe", -.872, .872, 1.156, 1.164, ORANGE)
+        self.shop_speaker = _text(self.shop, "", -.827, 1.080, .062, MINT, self.sans, mutable=True)
+        self.shop_line = _text(self.shop, "", -.827, 1.005, .043, PAPER, self.sans, mutable=True, wrap=36)
         self.shop_fields = []
-        for index in range(7):
-            z = .824 - index * .073
+        for index in range(len(WEAPON_KEYS)):
+            column, item_index = divmod(index, 6)
+            left = -.827 + .849 * column
+            z = .835 - item_index * .097
             row = self.shop.attach_new_node("shop item", 2)
-            _panel(row, "shop item shade", -.565, .565, z - .021, z + .035, (.087, .145, .16, 1))
-            key = _text(row, "", -.540, z, .038, ORANGE, self.mono, mutable=True)
-            item = _text(row, "", -.472, z, .041, PAPER, self.sans, mutable=True)
-            price = _text(row, "", .540, z, .036, MINT, self.mono, align=TextNode.A_right, mutable=True)
+            _panel(row, "shop item shade", left, left + .805, z - .026, z + .045, (.087, .145, .16, 1))
+            _panel(row, "shop key backdrop", left, left + .067, z - .026, z + .045, (.056, .108, .125, 1))
+            key = _text(row, "", left + .034, z, .041, ORANGE, self.mono,
+                        align=TextNode.A_center, mutable=True)
+            item = _text(row, "", left + .092, z, .044, PAPER, self.sans, mutable=True)
+            price = _text(row, "", left + .780, z, .040, MINT, self.mono,
+                          align=TextNode.A_right, mutable=True)
             self.shop_fields.append((row, key, item, price))
-        _text(self.shop, "1-7  BUY", -.562, .277, .031, PALE, self.mono)
-        self.shop_exit = _text(self.shop, "E  CLOSE", .562, .277, .031, ORANGE, self.mono,
+        _text(self.shop, "Choose an item key", -.827, .285, .039, PALE, self.sans)
+        self.shop_exit = _text(self.shop, "E  CLOSE", .827, .285, .036, ORANGE, self.mono,
                                align=TextNode.A_right, mutable=True)
 
     def set_state(self, state):
@@ -707,6 +720,11 @@ class Overlay:
                 if index < len(rows):
                     for label, value in zip((key, item, price), rows[index]):
                         _set_text(label, str(value))
+                    price_width = max(price.textNode.get_width(), 1)
+                    price_scale = min(.040, .203 / price_width)
+                    price.setTextScale(price_scale)
+                    available = .658 - price_width * price_scale
+                    item.setTextScale(min(.044, available / max(item.textNode.get_width(), 1)))
                     row.show()
                 else:
                     row.hide()
@@ -804,7 +822,7 @@ class Overlay:
     def update(self, dt, *, district="", position=(0, 0, 0), heading=0, speed=0,
                rpm=0, gear="", health=100, money=0, hour=17, context="", fps=0,
                debug_info="", driving=False, car_health=100, armor=0, weapon="",
-               ammo=None, reserve=None, reloading=False, aiming=False, objective="", waypoint=None,
+               weapon_slot=None, ammo=None, reserve=None, reloading=False, aiming=False, objective="", waypoint=None,
                wanted=0, wanted_status="", gps_route=()):
         if self.state != "playing":
             return
@@ -841,7 +859,12 @@ class Overlay:
         self.aiming = aiming
         self.armed = bool(weapon)
         if self.armed and not driving:
-            _set_text(self.weapon_name, weapon)
+            if self.weapon_name.text != weapon:
+                _set_text(self.weapon_name, weapon)
+                self.weapon_name.setTextScale(min(.042, .332 / max(self.weapon_name.textNode.get_width(), 1)))
+            hotkey = WEAPON_KEYS.get(weapon_slot, "")
+            _set_text(self.weapon_key, hotkey)
+            self.weapon_hotkey.show() if hotkey else self.weapon_hotkey.hide()
             ammunition = "" if ammo is None else str(ammo) if reserve is None else f"{ammo} / {reserve}"
             _set_text(self.ammo_text, ammunition)
             if ammo is None:
