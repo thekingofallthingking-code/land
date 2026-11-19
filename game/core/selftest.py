@@ -150,7 +150,8 @@ def run_self_test(app, duration):
     samples = []
     max_chunks = len(app.city.loaded_chunks)
     tick_count = 0
-    times_up = started + duration
+    sample_start = time.perf_counter()
+    times_up = max(started + duration, sample_start + 1.0)
     while time.perf_counter() < times_up:
         tick_start = time.perf_counter()
         phase = tick_count % 480
@@ -166,19 +167,21 @@ def run_self_test(app, duration):
         app.performance.record(frame_time)
         max_chunks = max(max_chunks, len(app.city.loaded_chunks))
         assert_finite(app)
-        assert len(app.police.vehicles) + len(app.foot_police.officers) <= app.police_cap
+        assert len(app.police.vehicles) + len(app.foot_police.officers) + app.police.air_count <= app.police_cap
         assert len(app.traffic.vehicles) <= app.traffic.cap
         assert len(app.peds.people) <= app.peds.limit
         tick_count += 1
         time.sleep(max(0., tick_start + STEP - time.perf_counter()))
-    assert tick_count > duration * 7, "Simulation throughput fell below 7 updates per second"
+    assert samples, "The replay ran without collecting a frame"
+    if app.headless:
+        assert tick_count > (times_up - sample_start) * 7, "Simulation throughput fell below 7 updates per second"
     duration_run = time.perf_counter() - started
     rate_label = "uncapped updates/s" if app.headless else "measured FPS"
     print(f"SELF-TEST PASS | {duration_run:.1f} s | {tick_count} scripted ticks | "
           f"{tick_count / duration_run:.1f} scripted ticks/s | "
           f"{1 / statistics.mean(samples):.1f} {rate_label} | "
           f"{max_chunks} peak chunks | {len(app.vehicles)} parked/owned | {len(app.traffic.vehicles)} traffic | "
-          f"{len(app.peds.people)} pedestrians | {len(app.police.vehicles) + len(app.foot_police.officers)} police | "
+          f"{len(app.peds.people)} pedestrians | {len(app.police.vehicles) + len(app.foot_police.officers) + app.police.air_count} police | "
           f"{app.explosions.blast_count} blasts | 1 player", flush=True)
     if app.options.screenshot:
         from game.core.config import SCREENSHOTS

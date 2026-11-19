@@ -218,7 +218,7 @@ class CityLighting:
             post.set_shader(Shader.make(Shader.SL_GLSL, POST_VERTEX, POST_FRAGMENT))
             post.set_shader_input("bloom_tex", glow)
 
-    def update(self, dt, focus, camera_position):
+    def update(self, dt, focus, camera_position, *, weather=0.0):
         self.hour = (self.hour + dt * 24.0 / DAY_SECONDS) % 24.0
         angle = (self.hour - 6.0) * math.tau / 24.0
         day = math.sin(angle)
@@ -230,7 +230,7 @@ class CityLighting:
         moon_direction = Vec3(-sun_direction.x, -.27, -sun_direction.z + .14)
         moon_direction.normalize()
         golden = max(0.0, 1.0 - abs(day) * 1.65)
-        sunlight = max(0.0, min(1.65, (day + .09) * 3.7))
+        sunlight = max(0.0, min(1.65, (day + .09) * 3.7)) * (1 - .67 * weather)
         show_shadow = bool(self.shadow_size and sunlight > .01)
         if show_shadow != self.shadow_active:
             self.sun.node().set_shadow_caster(show_shadow, self.shadow_size, self.shadow_size)
@@ -243,10 +243,14 @@ class CityLighting:
         self.moon.look_at(-moon_direction)
         self.moon.node().set_color(Vec4(.10 * self.night, .17 * self.night, .33 * self.night, 1))
         ambient = mix(Vec3(.39, .43, .48), Vec3(.13, .17, .28), self.night)
+        ambient = mix(ambient, Vec3(.21, .27, .36), weather * .58)
         self.ambient.node().set_color(Vec4(*ambient, 1))
         horizon = mix(Vec3(.39, .55, .64), Vec3(.50, .25, .19), golden)
         horizon = mix(horizon, Vec3(.065, .102, .17), self.night)
         zenith = mix(Vec3(.105, .275, .46), Vec3(.014, .025, .068), self.night)
+        horizon = mix(horizon, Vec3(.17, .22, .28), weather * .77)
+        zenith = mix(zenith, Vec3(.09, .12, .19), weather * .69)
+        self.fog.set_exp_density(.00175 + weather * .0026)
         self.fog.set_color(*horizon)
         self.sky.set_pos(camera_position)
         self.sky.set_shader_input("sun_dir", sun_direction)

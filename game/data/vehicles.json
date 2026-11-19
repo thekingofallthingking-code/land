@@ -58,5 +58,20 @@
     "drive": "all",
     "grip": 3.8,
     "color": [0.13, 0.23, 0.42, 1.0]
+  },
+  "swat": {
+    "name": "Harbor Tactical Van",
+    "mass": 3020,
+    "length": 5.62,
+    "width": 2.23,
+    "height": 2.22,
+    "wheelbase": 3.45,
+    "wheel_radius": 0.40,
+    "wheel_width": 0.29,
+    "power": 8700,
+    "top_speed": 156,
+    "drive": "all",
+    "grip": 3.5,
+    "color": [0.16, 0.23, 0.27, 1.0]
   }
 }

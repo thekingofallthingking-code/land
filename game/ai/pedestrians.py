@@ -42,6 +42,11 @@ def _angle(vector):
     return math.degrees(math.atan2(-vector.x, vector.y))
 
 
+def _away_from_corners(point):
+    near, far = sorted(abs(axis - round(axis / CHUNK_SIZE) * CHUNK_SIZE) for axis in (point.x, point.y))
+    return near > ROAD_HALF_WIDTH + 1. and far > 19.
+
+
 def _make_model(title, spec, variation):
     root = NodePath(title)
     colors = spec["styles"][variation % len(spec["styles"])]
@@ -136,16 +141,19 @@ class _CitizenArt:
                        for side in ("left", "right")]
         self.sidearm = self.model.find("**/sidearm")
         self.phase = phase
+        self.gesture = phase
         self.fall = 0.
+        self.sit = 0.
         self.armed = False
 
-    def update(self, dt, state, speed):
+    def update(self, dt, state, speed, seat_offset=0.):
         falling = state in ("knocked_down", "dead")
         cowering = state == "panic"
         target = 1. if falling else 0.
         self.fall += (target - self.fall) * min(1., dt * (13 if falling else 5))
+        self.sit += (float(state == "seated") - self.sit) * min(1., dt * 9.)
         self.model.set_p(86 * self.fall)
-        self.model.set_z(.21 * self.fall)
+        self.model.set_z(.21 * self.fall + self.sit * seat_offset)
         draw = state == "fight"
         if not self.sidearm.is_empty() and draw != self.armed:
             self.armed = draw
@@ -155,6 +163,7 @@ class _CitizenArt:
                 self.sidearm.hide()
         gait = min(1., speed / 1.35)
         self.phase += dt * (3.4 + speed * 2.5) if gait > .015 else 0.
+        self.gesture += dt * 3.1
         running = max(0., min(1., (speed - 1.55) / 1.65))
         self.torso.set_z(.85 if cowering else .91 + gait * abs(math.sin(self.phase)) * (.014 + .019 * running))
         self.torso.set_p(-16 if cowering else -9. * running)
@@ -162,12 +171,14 @@ class _CitizenArt:
             phase = self.phase + index * math.pi
             stride = math.sin(phase) * gait
             lift = max(0., math.cos(phase)) * gait
-            leg.set_p(stride * (24 + 11 * running) + 28 * self.fall)
-            shin.set_p(-lift * (19 + 23 * running) - (12 + index * 10) * self.fall)
-            arm_pitch = -stride * (23 + 13 * running) + 16 * self.fall
+            leg.set_p(stride * (24 + 11 * running) + 28 * self.fall + 88 * self.sit)
+            shin.set_p(-lift * (19 + 23 * running) - (12 + index * 10) * self.fall - 86 * self.sit)
+            shin.set_sz(1 + .17 * self.sit)
+            wave = (15 + 15 * math.sin(self.gesture)) if state == "chat" and index == 1 else 0.
+            arm_pitch = -stride * (23 + 13 * running) + 16 * self.fall + 12 * self.sit + wave
             arm.set_p(66 if draw else 37 if cowering else arm_pitch)
             arm.set_r((-1 if index == 0 else 1) * (10 + 11 * self.fall))
-            forearm.set_p(18 if draw else 69 if cowering else 8 + gait * (12 + 35 * running))
+            forearm.set_p(18 if draw else 69 if cowering else 8 + gait * (12 + 35 * running) + wave)
 
 
 @dataclass(frozen=True)
@@ -218,6 +229,11 @@ class Pedestrian:
         self.reaction = "flee"
         self.escape_until = 0.
         self.drag = None
+        self.ambient = False
+        self.chat = ()
+        self.seat = None
+        self.seat_offset = 0.
+        self.social_until = 0.
 
     @property
     def position(self):
@@ -253,6 +269,7 @@ class PedestrianManager:
         self.events = events
         self.root = render.attach_new_node("Sidewalk population")
         self.rng = random.Random(seed)
+        self.social_rng = random.Random(seed + 1)
         self.limit = max(1, min(40, int(limit)))
         self.people = []
         self.archetypes = {spec["id"]: spec for spec in _read_data("npcs.json")["archetypes"]}
@@ -270,6 +287,8 @@ class PedestrianManager:
         self._player = None
         self._car_samples = []
         self._next_car_sample = 0.
+        self._next_social = 1.2
+        self._next_pair = 0.
         self._shop = Vec3(getattr(city, "shop", Vec3(15.6, 46, .19)))
         self.shopkeeper = None
         self.events.subscribe("gunshot", self._gunshot)
@@ -334,6 +353,7 @@ class PedestrianManager:
         return person
 
     def _remove(self, person):
+        self._leave_social(person)
         self.people.remove(person)
         person.node.remove_node()
         if person is self.shopkeeper:
@@ -380,11 +400,106 @@ class PedestrianManager:
             if self.rng.random() < .5:
                 origin, destination = destination, origin
             tx, ty = self.graph.sidewalk_position(destination)
-            self._spawn(position, spec["id"], (origin, destination),
-                        _angle(Vec3(tx - position.x, ty - position.y, 0)), False)
+            direction = Vec3(tx - position.x, ty - position.y, 0).normalized()
+            person = self._spawn(position, spec["id"], (origin, destination), _angle(direction), False)
+            person.ambient = True
             available -= 1
+            if available and 12 < distance < 57 and self.elapsed >= self._next_pair:
+                nearby = position + direction * 1.55
+                if (_away_from_corners(position) and _away_from_corners(nearby)
+                        and self.city.is_loaded(nearby.x, nearby.y)
+                        and all(p is person or _flat_distance(nearby, p.position) > 1.5 for p in self.people)):
+                    companion = self._spawn(nearby, "local", (origin, destination), _angle(-direction), False)
+                    companion.ambient = True
+                    self._start_chat((person, companion))
+                    self._next_pair = self.elapsed + 19.
+                    available -= 1
             if available == 0:
                 break
+
+    def _start_chat(self, members):
+        center = sum((member.position for member in members), Vec3()) / len(members)
+        end = self.elapsed + self.social_rng.uniform(6., 11.)
+        for person in members:
+            person.chat = members
+            person.state = "chat"
+            person.social_until = end
+            person.velocity = Vec3()
+            person.node.set_h(_angle(center - person.position))
+
+    def _leave_social(self, person):
+        for member in person.chat:
+            member.chat = ()
+            member.state = "idle"
+            member.rest_until = self.elapsed + .3
+            member.social_until = self.elapsed + 12.
+        if person.seat is not None:
+            if person.state == "seated":
+                person.node.set_pos(self.render, person.seat.approach)
+            person.seat = None
+            person.state = "idle"
+            person.route_from = person.route_to = person.route_entry = None
+            person.rest_until = self.elapsed + .36
+            person.social_until = self.elapsed + 15.
+
+    def _schedule_social(self):
+        self._next_social = self.elapsed + self.social_rng.uniform(.9, 1.5)
+        candidates = [
+            person for person in self.people
+            if person.ambient and not person.pinned and person.state in ("idle", "walk") and not person.crossing
+            and person.hostility < 12 and self.elapsed >= person.social_until
+            and self.elapsed - person.last_talk > 5 and 4.5 < _flat_distance(person.position, self._focus) < 48
+            and _away_from_corners(person.position)
+        ]
+        if not candidates:
+            return
+        self.social_rng.shuffle(candidates)
+        taken = [person.seat for person in self.people if person.seat is not None]
+        if len(taken) < 2:
+            for seat in self.city.bench_seats:
+                if seat in taken or _flat_distance(seat.approach, self._focus) > 49:
+                    continue
+                closest = min(candidates, key=lambda p: _flat_distance(p.position, seat.approach))
+                start = closest.position
+                if _flat_distance(start, seat.approach) < 14.5 and self._blocked(
+                        start + _UP * .88, seat.approach + _UP * .88) is None:
+                    closest.seat = seat
+                    closest.state = "bench_walk"
+                    closest.social_until = self.elapsed + 15.
+                    return
+        if sum(bool(person.chat) for person in self.people) >= 5:
+            return
+        for center in candidates:
+            company = [person for person in candidates if person is not center
+                       and 1.1 < _flat_distance(center.position, person.position) < 2.65]
+            if company:
+                self._start_chat((center, *company[:2]))
+                return
+
+    def _use_bench(self, person, dt):
+        seat = person.seat
+        if self.elapsed >= person.social_until or not self.city.is_loaded(seat.approach.x, seat.approach.y):
+            self._leave_social(person)
+            return
+        if person.state == "seated":
+            return
+        approaching = person.state == "bench_walk"
+        goal = seat.approach if approaching else Vec3(seat.position.x, seat.position.y, seat.approach.z)
+        position = person.position
+        offset = goal - position
+        offset.z = 0.
+        distance = offset.length()
+        speed = person.spec["walk_mps"]
+        if distance < max(.09, speed * dt):
+            person.node.set_pos(self.render, goal)
+            person.state = "bench_step" if approaching else "seated"
+            if not approaching:
+                person.velocity = Vec3()
+                person.node.set_h(seat.heading)
+                person.seat_offset = seat.position.z + .025 - goal.z - .91 * person.height
+                person.social_until = self.elapsed + self.social_rng.uniform(13., 23.)
+            return
+        self._shift(person, position + offset * (speed * dt / distance), offset, speed, dt)
 
     def _line(self, person, mood):
         lines = self.lines[person.archetype_id][mood]
@@ -408,6 +523,8 @@ class PedestrianManager:
     def talk(self, person, player_position=None):
         if not person.alive:
             return ""
+        if person.chat:
+            self._leave_social(person)
         if self.elapsed - person.last_talk < 1.4:
             person.hostility = min(100., person.hostility + 15.)
         person.last_talk = self.elapsed
@@ -435,6 +552,7 @@ class PedestrianManager:
     def damage(self, person, amount, *, source=None, direction=None, headshot=False, kind="gunshot", **_):
         if not person.alive or amount <= 0 or not math.isfinite(amount):
             return False
+        self._leave_social(person)
         person.health = max(0., person.health - amount)
         person.hostility = min(100., person.hostility + max(52., amount * 1.65))
         if direction is not None:
@@ -499,6 +617,7 @@ class PedestrianManager:
     def _frighten(self, person, position):
         if not person.alive or person.state in ("dead", "knocked_down", "fight"):
             return
+        self._leave_social(person)
         person.threat = Vec3(position)
         person.escape_until = max(person.escape_until, self.elapsed + self.rng.uniform(6.0, 10.0)
                                   - person.spec["courage"] * 2.)
@@ -746,6 +865,13 @@ class PedestrianManager:
         if person.state == "flee" and (self.elapsed >= person.escape_until or person.pinned):
             person.state = "idle"
             person.rest_until = self.elapsed + .3
+        if person.chat:
+            if self.elapsed >= person.social_until:
+                self._leave_social(person)
+            return
+        if person.seat is not None:
+            self._use_bench(person, dt)
+            return
         if person.pinned or (self.elapsed < person.rest_until and person.state != "flee"):
             if person.pinned and self.elapsed < person.escape_until:
                 person.state = "panic"
@@ -765,12 +891,14 @@ class PedestrianManager:
         if elapsed >= self._next_car_sample:
             self._sample_cars(vehicles, occupied)
             self._next_car_sample = elapsed + .065
+        if elapsed >= self._next_social:
+            self._schedule_social()
         for person in self.people:
             distance = _flat_distance(person.position, focus)
             self._update_person(person, dt, player, distance, occupied)
             if elapsed >= person.animation_at:
                 period = dt if distance < 34 else .083 if distance < 70 else .18
-                person.art.update(period, person.state, person.velocity.length())
+                person.art.update(period, person.state, person.velocity.length(), person.seat_offset)
                 person.animation_at = elapsed + period
 
     def _raycast_person(self, person, origin, direction, max_distance, width=0.):
@@ -782,7 +910,8 @@ class PedestrianManager:
             forward = person.node.get_quat(self.render).get_forward()
             spheres = ((position - forward * .84 + _UP * .24, .42, False),)
         else:
-            spheres = tuple((position + _UP * (z * scale), (radius + width) * scale, head)
+            offset = _UP * (person.seat_offset * person.art.sit)
+            spheres = tuple((position + offset + _UP * (z * scale), (radius + width) * scale, head)
                             for z, radius, head in ((1.64, .171, True), (1.18, .287, False),
                                                      (.76, .265, False), (.37, .19, False)))
         best = None

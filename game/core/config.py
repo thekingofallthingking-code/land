@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 import platform
+from tempfile import NamedTemporaryFile
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "assets_generated"
@@ -60,9 +61,18 @@ def read_json(path: Path) -> dict:
 
 def write_json(path: Path, value: dict) -> None:
     project_file(path)
-    pending = project_file(path.with_name(path.name + ".tmp"))
-    pending.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-    pending.replace(path)
+    parent = project_file(path.parent)
+    pending = None
+    try:
+        with NamedTemporaryFile(mode="w", encoding="utf-8", dir=parent, delete=False,
+                                prefix=f".{path.name}-", suffix=".tmp") as handle:
+            pending = Path(handle.name)
+            json.dump(value, handle, indent=2, allow_nan=False)
+            handle.write("\n")
+        project_file(pending).replace(project_file(path))
+    finally:
+        if pending is not None:
+            project_file(pending).unlink(missing_ok=True)
 
 
 def memory_gib() -> float:

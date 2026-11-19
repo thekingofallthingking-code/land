@@ -38,6 +38,11 @@ SHOP_POSITION = (15.6, 46, SIDEWALK + .01)
 HOSPITAL_POSITION = (13.5, -28, SIDEWALK + .01)
 SHOP_NAME = "Tideway Supply"
 HOSPITAL_NAME = "Breakwater Clinic"
+HIDEOUT_CHUNK = (4, 0)
+HIDEOUT_BAY = (64, 82)
+HIDEOUT_LANE_X = 72
+HIDEOUT_NAME = "Lantern Lockup"
+HIDEOUT_RADIUS = 4.0
 BENCH_TOP = .75
 BENCH_REACH = 1.05
 BENCH_FACING = {
@@ -481,6 +486,38 @@ def container(mesh, collider, x, y, bottom, rng):
                  (.07, .06, height * .82), POST)
 
 
+def lockup(mesh, glow, collider):
+    """Covered parking bay entered via a turn from the dockyard alley."""
+    x, y = HIDEOUT_BAY
+    siding = (.32, .39, .39)
+    painted_steel = (.24, .42, .39)
+    paint = (.51, .69, .60)
+    pale = (.88, .81, .64)
+    for wall_y in (y - 6.65, y + 6.65):
+        structure(mesh, collider, x, wall_y, 11.3, .42, SIDEWALK, 4.2, siding)
+        mesh.box((x + 5.59, wall_y, 2.27), (.26, .56, 4.18), painted_steel)
+    structure(mesh, collider, x - 5.46, y, .42, 13.45, SIDEWALK, 4.2, siding)
+    structure(mesh, collider, x, y, 11.7, 13.9, 4.30, .36, painted_steel)
+    mesh.box((x + 5.79, y, 4.72), (.22, 12.75, .78), (.17, .30, .29))
+    lettering(mesh, "east", x + 5.925, y, 4.44, .111, HIDEOUT_NAME.upper(), pale)
+    lettering(glow, "east", x + 5.953, y, 4.44, .111, HIDEOUT_NAME.upper(),
+              (.78, .91, .72))
+
+    mesh.slab(x - 5.18, y - 6.40, x + 5.77, y + 6.40, .194, (.26, .30, .31))
+    for off in (-2.05, 2.05):
+        mesh.slab(x - 3.25, y + off, x + 2.70, y + off + .08, .202, paint)
+    mesh.slab(x - 3.25, y - 2.05, x - 3.17, y + 2.13, .202, paint)
+    for side in (-1, 1):
+        mesh.box((x + 3.24, y + side * 2.6, 4.24),
+                 (.55, 1.45, .18), TRIM, bottom=True)
+        glow.box((x + 3.24, y + side * 2.6, 4.13),
+                 (.44, 1.22, .041), (.69, .85, .73), bottom=True)
+    for along in (17, 29, 43, 56, 71, 94, 109, 122):
+        mesh.slab(HIDEOUT_LANE_X - .065, along, HIDEOUT_LANE_X + .065, along + 2.45, .196, paint)
+    mesh.face(((x + 6.37, y, .198), (x + 7.80, y - 1.25, .198),
+               (x + 7.80, y + 1.25, .198)), paint, (0, 0, 1))
+
+
 def harbor(mesh, glow, collider, ix, iy, rng):
     mesh.slab(13, 13, 131, 131, .184, (.35, .36, .38))
     finish = rng.choice(((.51, .53, .49), (.49, .44, .38), (.37, .46, .47)))
@@ -514,6 +551,9 @@ def harbor(mesh, glow, collider, ix, iy, rng):
         mesh.box((x, 21.5, .25), (8, .17, .10), YELLOW)
     if (ix + iy) % 3 == 0:
         ramp(mesh, collider, 44, 114)
+    if (ix, iy) == HIDEOUT_CHUNK:
+        lockup(mesh, glow, collider)
+        container(mesh, collider, 77.5, 83, SIDEWALK, rng)
 
 
 def ramp(mesh, collider, x, y):

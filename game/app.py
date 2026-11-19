@@ -30,6 +30,7 @@ from game.core.wanted import OFFENSES, Wanted
 from game.entities.player import Player
 from game.entities.vehicles import Vehicle
 from game.entities.weapons import HitTarget, WEAPON_SPECS, WeaponSystem, build_weapon_model, weapon_muzzle
+from game.fx.weather import Weather
 from game.missions.activities import Activities
 from game.missions.delivery import DeliveryJob
 from game.tools.assets import ensure_assets
@@ -142,6 +143,7 @@ class HarborCity(ShowBase):
         self.player = Player(self.render, self.physics, self.city.spawn)
         self.follow_camera = ThirdPersonCamera(self.camera, self.physics, sensitivity=self.settings.sensitivity)
         self.lighting = CityLighting(self, preset, self.city.root, rendered=not self.headless)
+        self.weather = Weather(self.render, self.camera, quality, rendered=not self.headless)
         if options.hour is not None:
             self.lighting.hour = options.hour % 24
         if not self.headless:
@@ -547,8 +549,10 @@ class HarborCity(ShowBase):
             "pedestrians": len(self.peds.people),
             "traffic": len(self.traffic.vehicles),
             "parked_owned": sum(car.physics_active for car in self.vehicles),
-            "police_cruisers": len(self.police.vehicles),
+            "police_cruisers": len(self.police.vehicles) - self.police.swat_count,
+            "police_vans": self.police.swat_count,
             "police_officers": len(self.foot_police.officers),
+            "police_aircraft": self.police.air_count,
             "roadblocks": self.police.roadblock_count,
             "wanted_stars": self.wanted.stars,
             "explosion_props": len(self.explosions.props),
@@ -570,8 +574,9 @@ class HarborCity(ShowBase):
                 visible = focus
             else:
                 ignore = (self.player.controller, self.occupied.body if self.occupied else None)
-                for position, body in self.police.sighting_sources():
-                    if ((position - target).length_squared() < 79 ** 2
+                for position, body in self.police.sighting_sources(target):
+                    radius = 135 if body is None else 79
+                    if ((position - target).length_squared() < radius ** 2
                             and clear_sight(self.physics, position, target, (*ignore, body))):
                         visible = focus
                         break
@@ -649,6 +654,13 @@ class HarborCity(ShowBase):
     def toggle_conversation(self):
         if self.conversation:
             self.end_conversation()
+        elif self.at_hideout():
+            if self.occupied and self.occupied.body.get_linear_velocity().length_squared() > (12 / 3.6) ** 2:
+                self.show_notice("Stop inside the lockup first")
+            elif self.wanted.take_cover(self.elapsed):
+                self.show_notice(f"Laying low at {self.city.hideout_name}")
+            else:
+                self.show_notice("Break police sight before laying low")
         elif not self.occupied and not self.theft:
             if (offer := self.activities.offered_at(self.player.position)) is not None:
                 if self.activities.accept(offer.id):
@@ -662,6 +674,10 @@ class HarborCity(ShowBase):
             if person is not None:
                 self.conversation = person
                 self.show_conversation(self.peds.talk(person, self.player.position))
+
+    def at_hideout(self):
+        return bool(self.wanted.stars
+                    and (self.focus() - self.city.hideout).length_squared() <= self.city.hideout_radius ** 2)
 
     def show_conversation(self, line):
         if self.overlay:
@@ -791,7 +807,8 @@ class HarborCity(ShowBase):
                                 night=self.lighting.night, elapsed=self.elapsed)
             self.police.update(dt, self.elapsed, self.wanted, self.focus(), player_vehicle=self.occupied,
                                obstacles=(*self.vehicles, *self.traffic.vehicles), pedestrians=walkers,
-                               foot_count=len(self.foot_police.officers), night=self.lighting.night)
+                               foot_count=len(self.foot_police.officers), foot_capacity=self.foot_police.cap,
+                               night=self.lighting.night)
         for vehicle in self.vehicles:
             occupied = vehicle is self.occupied
             vehicle.update(dt, controls.forward if occupied else 0,
@@ -860,7 +877,8 @@ class HarborCity(ShowBase):
             if (self.conversation and (not self.conversation.alive or
                                        (self.conversation.position - focus).length_squared() > 4.8 ** 2)):
                 self.end_conversation()
-        night = self.lighting.update(live_dt, focus, self.camera.get_pos())
+        rain = self.weather.update(live_dt, self.lighting.hour, focus)
+        night = self.lighting.update(live_dt, focus, self.camera.get_pos(), weather=rain)
         self.city.set_night(night)
         if self.crowd and live_dt > 0:
             nearby = sum(person.alive and (person.position - focus).length_squared() < 23 ** 2
@@ -874,7 +892,10 @@ class HarborCity(ShowBase):
             speed, rpm, gear = (vehicle.speed_kph, vehicle.rpm, vehicle.gear) if vehicle else (0, 0, "")
             ammo, reserve = self.weapons.ammo if self.weapons.selected.id != "melee" else (None, None)
             fps = ClockObject.get_global_clock().get_average_frame_rate()
-            activities_objective = self.activities.objective(focus)
+            objective = self.activities.objective(focus) or self.delivery.objective(focus)
+            landmark = self.activities.waypoint(focus) or self.delivery.waypoint()
+            if not objective and self.wanted.mode in ("search", "cooldown"):
+                landmark = self.city.hideout
             self.overlay.update(
                 dt, district=self.city.district(focus.x, focus.y), position=focus,
                 heading=vehicle.heading if vehicle else self.follow_camera.heading,
@@ -882,12 +903,12 @@ class HarborCity(ShowBase):
                 money=self.player.money, hour=self.lighting.hour, context=context,
                 fps=fps, debug_info=f"{self.quality}  |  {len(self.city.loaded_chunks)} chunks  |  "
                 f"{len(self.all_vehicles())} cars\n"
-                f"{len(self.peds.people)} pedestrians  |  {len(self.police.vehicles) + len(self.foot_police.officers)} police",
+                f"{len(self.peds.people)} pedestrians  |  "
+                f"{len(self.police.vehicles) + len(self.foot_police.officers) + self.police.air_count} police",
                 driving=vehicle is not None, car_health=vehicle.health if vehicle else 100,
                 armor=self.player.armor, weapon=self.weapons.selected.name, ammo=ammo, reserve=reserve,
                 reloading=self.weapons.reload_remaining > 0, aiming=self.aiming,
-                objective=activities_objective or self.delivery.objective(focus),
-                waypoint=self.activities.waypoint(focus) or self.delivery.waypoint(),
+                objective=objective, waypoint=landmark,
                 gps_route=self.activities.route(focus),
                 wanted=self.wanted.stars,
                 wanted_status={"pursuit": "Pursuit", "search": "Searching", "cooldown": "Cooling down",
@@ -902,6 +923,8 @@ class HarborCity(ShowBase):
             return ""
         vehicle_key = self.settings.bindings["interact"].upper()
         talk_key = self.settings.bindings["talk"].upper()
+        if self.at_hideout():
+            return f"{talk_key}   Lay low"
         if self.occupied:
             return f"{vehicle_key}   Exit vehicle"
         if self.theft:
@@ -1075,5 +1098,6 @@ class HarborCity(ShowBase):
             vehicle.close()
         self.player.close()
         self.city.close()
+        self.weather.close()
         self.lighting.close()
         self.destroy()

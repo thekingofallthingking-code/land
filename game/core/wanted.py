@@ -22,6 +22,7 @@ class Wanted:
         self.last_seen = (0.0, 0.0, 0.0)
         self.last_seen_time = 0.0
         self.next_cooldown = 0.0
+        self.cooldown_interval = RULES["cooldown_seconds"]
         self.report_times = {}
 
     @property
@@ -48,6 +49,18 @@ class Wanted:
         self.last_seen_time = elapsed
         self.mode = "pursuit"
         self.next_cooldown = 0.0
+        self.cooldown_interval = RULES["cooldown_seconds"]
+
+    def take_cover(self, elapsed):
+        if not self.stars or self.mode not in ("search", "cooldown"):
+            return False
+        if self.mode != "cooldown":
+            self.next_cooldown = elapsed + RULES["sheltered_seconds"]
+        self.cooldown_interval = RULES["sheltered_seconds"]
+        self.next_cooldown = min(self.next_cooldown, elapsed + self.cooldown_interval)
+        self.last_seen_time = min(self.last_seen_time, elapsed - RULES["loss_grace"] - RULES["search_seconds"] - .01)
+        self.mode = "cooldown"
+        return True
 
     def update(self, elapsed, visible_position=None):
         if not self.stars:
@@ -63,10 +76,10 @@ class Wanted:
             return
         if self.mode != "cooldown":
             self.mode = "cooldown"
-            self.next_cooldown = elapsed + RULES["cooldown_seconds"]
+            self.next_cooldown = elapsed + self.cooldown_interval
         while self.stars and elapsed >= self.next_cooldown:
             self.heat = THRESHOLDS[self.stars - 1] - 1
-            self.next_cooldown += RULES["cooldown_seconds"]
+            self.next_cooldown += self.cooldown_interval
         if not self.stars:
             self.clear()
 

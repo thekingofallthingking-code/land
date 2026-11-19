@@ -318,8 +318,9 @@ class Overlay:
         self.wanted_group = parent.attach_new_node("wanted status")
         _panel(self.wanted_group, "wanted backdrop", -.398, -.048, -.365, -.243, DARK)
         _panel(self.wanted_group, "wanted stripe", -.398, -.048, -.249, -.243, ORANGE)
-        self.wanted_stars = [_star(self.wanted_group, -.347 + .060 * index, -.286) for index in range(3)]
-        self.wanted_message = _text(self.wanted_group, "", -.376, -.342, .038, ORANGE, self.sans, mutable=True)
+        self.wanted_stars = [_star(self.wanted_group, -.223 + .060 * step, -.286) for step in range(-2, 3)]
+        self.wanted_message = _text(self.wanted_group, "", -.223, -.342, .038, ORANGE, self.sans,
+                                    align=TextNode.A_center, mutable=True)
         self.wanted_group.hide()
 
         self.objective_group = self.hud_top_center.attach_new_node("objective")

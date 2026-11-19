@@ -9,7 +9,7 @@ Use original procedural art, models and audio. Keep violence arcade-style and no
 ## Commands
 
 - Windows setup and launch use `setup.bat`, then `run.bat`.
-- Windows suite uses `test.bat`, including the 65-second fixed-step integration replay.
+- Windows suite uses `test.bat`, including the 65-second offscreen integration replay. Windows diagnostics use `diag.bat`.
 - Windows 1080p driving benchmark uses `run.bat --benchmark --quality Medium --width 1920 --height 1080 --frames 240`.
 - Offscreen preview uses `run.bat --offscreen --frames 90 --quality Medium --screenshot preview.png`.
 - Linux setup uses `timeout 600s python3 game/tools/launch.py setup`. Linux suite uses `timeout 95s .venv/bin/python game/tools/launch.py test`.

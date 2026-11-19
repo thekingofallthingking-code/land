@@ -9,9 +9,10 @@ from panda3d.bullet import BulletBoxShape, BulletConvexHullShape, BulletRigidBod
 from panda3d.core import BitMask32, Point3, PointLight, TransformState, Vec3, Vec4
 
 from .design import (
-    BENCH_FACING, BENCH_REACH, BENCH_TOP, DISTRICT_BUILDERS, HOSPITAL_NAME,
-    HOSPITAL_POSITION, SHOP_NAME, SHOP_POSITION, SIDEWALK, bench, bench_layout,
-    street_lamp, street_surfaces, traffic_signal,
+    BENCH_FACING, BENCH_REACH, BENCH_TOP, DISTRICT_BUILDERS,
+    HIDEOUT_BAY, HIDEOUT_CHUNK, HIDEOUT_LANE_X, HIDEOUT_NAME, HIDEOUT_RADIUS,
+    HOSPITAL_NAME, HOSPITAL_POSITION, SHOP_NAME, SHOP_POSITION, SIDEWALK,
+    bench, bench_layout, street_lamp, street_surfaces, traffic_signal,
 )
 from .mesh import Mesh
 from .minimap import write_minimap
@@ -106,6 +107,11 @@ class City:
         self.hospital_name = HOSPITAL_NAME
         self.shop = Vec3(*SHOP_POSITION)
         self.shop_name = SHOP_NAME
+        lockup_x, lockup_y = (value * CHUNK_SIZE for value in HIDEOUT_CHUNK)
+        self.hideout = Vec3(lockup_x + HIDEOUT_BAY[0], lockup_y + HIDEOUT_BAY[1], SIDEWALK + .01)
+        self.hideout_access = Vec3(lockup_x + HIDEOUT_LANE_X, lockup_y, 0)
+        self.hideout_name = HIDEOUT_NAME
+        self.hideout_radius = HIDEOUT_RADIUS
         self.car_spawns = (
             ("compact", Vec3(6.35, 24, 1.0), 0),
             ("sport", Vec3(6.35, 66, 1.0), 0),

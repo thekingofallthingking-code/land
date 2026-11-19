@@ -1,59 +1,63 @@
-SECTION 3 PARTIAL
+SECTION 3 COMPLETE
 
 # Harbor City handoff
 
-Section 3 Step 0 passed on Linux. The five-unit baseline and 65.0-second headless replay passed. Added docs/SECTION_3.md and a fresh-PC bootstrap that downloads and verifies official CPython and pip inside the project. The Windows execution path remains unverified. Native GPU results were unavailable. Wanted 1–3, witness gating, search and cooldown passed eight unit tests and a bounded integrated headless run. The next launching checkpoint includes cruisers, foot officers, blasts, three extra missions, settings, manual slots and verified short integration. The P0 gate passed 17 unit tests, both 65-second Linux replay modes, and the three-star Medium 1080p profile. The profile measured 6.1 average FPS on llvmpipe with 4 cruisers, 4 foot officers, 40 blast particles and 2 debris at finish. No tuning was based on this software result. P1 begins from this verified checkpoint. The prior Section 2 verification follows.
+## Verified
 
-## Section 2 — The City Comes Alive
+The previous Section 2 checkpoint was `39d2633`. Section 3 began on Linux at 2026-11-19 20:58:10 UTC. No Windows runtime was available.
 
-Started 2026-11-19 20:35:50 UTC from `de03a1b`. The user authorized the Linux workspace as the project root and moved development to Section 2 ahead of Windows testing. Section 1 optional skid marks, rain, and radio were skipped. The Section 2 runtime drives the traffic lights.
+- Step 0 passed five unit tests and the existing 65.0-second headless replay. Reviewed and replaced the fresh-PC setup path. The official embeddable CPython and pip downloads matched their pinned SHA-256 values. Isolated package imports, the Linux diagnostic, and the new launcher against the previous stable rendered replay passed. Install and batch execution on Windows remain open.
+- P0 checkpoint `92ada3f` passed 17 unit tests and 65.0-second headless and offscreen replays. Scripted controls took a car in sight of a pedestrian, triggered wanted level three, drew moving cruisers, and exercised search, escape, blast chaining, the Exchange Sprint reward and save/reload. A staged foot officer arrested and released the player. Unit and real-city fixtures also covered witness-free events, wanted decay, damage falloff, arrest, save state, all three mission state machines, and shared-graph GPS.
+- Police component runs verified a solved Bullet ram, spin and box-in approach, physical roadblocks, dismounting and retirement. A scoped blast fixture used the actual launcher and grenade projectiles, chained fuel, barrels and a car, damaged an occupant at the car, and rolled a Bullet vehicle upside down. Offscreen captures show flame, smoke, rings, pooled debris and scorched wrecks. OpenAL null playback verified siren and blast starts, attenuation and cleanup.
+- The 72-frame P0 1080p Medium chase profile on Linux llvmpipe reached 6.1 average FPS, 2.6 minimum FPS, 278.0 ms p95 and 385.0 ms p99. At finish the scene held four cruisers, four foot officers, 40 blast particles and two debris. See `logs/section3-chaos-medium.log` and the runtime `logs/perf.log`.
+- P1 fixtures verified four-star SWAT vans, five-star helicopter spotlight and the shared 6/9/12 police caps. The integrated Medium offscreen drive reached five stars with one helicopter, two tactical vans, one cruiser and four foot officers. Lantern Lockup accepted E after loss of sight and shortened cooldown. Day and night captures and Bullet sweeps confirmed a van fits the sheltered bay. Rain, pedestrian chats and autonomous bench use were verified in separate timed fixtures.
+- Settings and save UI checks exercised quality selection, 12 key binding actions, three save slots, all seven shop rows, the wanted HUD, BUSTED and the clipped GPS overlay. Save slots and F5 use separate atomic files and preserve schema 1 and 2 compatibility.
 
-### P0 build
+Final Linux gate passed 19 unit tests, a 65.0-second headless replay (2,904 sampled ticks), and a 65.0-second Low 640×360 offscreen replay (2,440 sampled frames, 47.9 measured FPS). No windowed smoke was used. The diagnostic imported all five exact pins, constructed Bullet and probed Mesa OpenGL 4.5.
 
-- Capped pedestrians stream along the existing sidewalks and wait for their crossing phase. Five procedurally dressed archetypes idle, walk and run. Gunfire and threatening cars trigger panic. Actors can flee, hold a grudge, insult the player, fall, recover, and drop cash on defeat. Armed gang characters shoot back when they have line of sight.
-- Press E to speak to nearby pedestrians. Tideway Supply sells guns, reserve ammo and body armor. NPC dialogue varies with mood, and hostility fades over time. Active NPC memories live in the streamed simulation.
-- Lane-following Bullet traffic follows signals, turns, avoids cars, yields, honks and flees attacks. Press F at a stopped or slow occupied car to draw the driver out and take over its physics body. A displaced driver flees or fights.
-- Arcade pistol, SMG, shotgun, rifle and melee share camera aiming, recoil, spread, magazines, reserve ammo, head hits and pooled muzzle, tracer and impact effects. The player starts with a pistol and melee. Buy the other slots at Tideway Supply.
-- Armor absorbs damage, and death returns the player to Breakwater Clinic after the WASTED screen. Pick up dropped cash and weapons by walking close. Save schema 2 records inventory, armor and stolen cars. Section 1 schema 1 saves still load.
-- `logs/perf.log` appends one JSON object per line. Rendered runs record FPS and median, p95 and p99 frame times, with renderer, preset and resolution. A run records start, ten-second samples and a final entry on normal shutdown. Headless replay records simulation updates per second and timing percentiles.
+The final 1080p Medium three-star dusk stress captured 72 frames with a large chain blast. llvmpipe reached 7.4 average FPS, 2.1 minimum FPS, 117.1 ms median, 200.2 ms p95 and 470.2 ms p99. The final frame sample counted four cruisers, four foot officers, 40 blast particles and two debris. These are software-renderer observations. Presets and caps remain the hardware-policy choices.
 
-### P1 delivered
+The local release is `/workspace/work/HarborCity/_snapshots/HarborCity-Section-3.zip`, with source, launchers, handoff and selected Linux evidence.
 
-- Dock Run begins at the gold marker north of Tideway Supply. Accept with E, take a car with a driver, and stop in the marked Foundry Docks bay to earn $240. The objective banner and minimap marker follow the job. Active and completed job state is saved.
-- Benches have batched original geometry, collision and streamed seat anchors. Proximity-mixed procedural crowd ambience and capped, fading bullet marks on static scenery are in the build.
-- Autonomous group chatting and sitting on benches were deferred when a worker hit the usage limit. The handoff retains the P0 checkpoint and the stabilized P1 work.
+## Needs checking on Windows
 
-### Verification
+- **Setup from scratch.** On a clean Windows 10/11 x64 PC, double-click `setup.bat`. Check `logs\setup.log` and run `diag.bat`. Setup uses built-in PowerShell before Python is available, verifies official downloads, and installs the runtime and packages under `.venv\portable`. Check that the bundled runtime launches and the dependency wheels import on that PC.
+- **Launch and input.** Run `run.bat` and `test.bat`. Exercise mouse capture, focus, pause, remapping, restart after switching quality, F5, and a manual save/load slot.
+- **Audible sound.** Listen to actual engine, horn, crowd, shot, siren and near/far blast audio through the PC's output.
+- **Real-GPU FPS.** Run the 1080p Medium chase benchmark below, drive with F3 open, and return `logs\perf.log`. It records graphics vendor, renderer, driver/GL, average/minimum FPS, p95/p99, and population/effect counts. Existing 45 FPS Medium target remains to be checked on the target PC.
+- **Handling and chase feel.** Verify steering, braking, reversing, drift, hood camera, vehicle exit, PIT response, five-star escape, roadblocks and arrest timing on the intended hardware.
 
-Linux setup reran successfully with all five exact dependency pins and synthesized the new audio. Component fixtures covered crossing phases, vehicle hits, line-of-sight retaliation, stationary and moving traffic, all weapon slots, reloads, head/body hits, cover, and carjacking. OpenAL's null backend confirmed sound playback state and cleanup. Daylight, gunfire HUD, marketplace UI, clinic and hospital UI were rendered and inspected during component and integration checks.
+## Partial
 
-The final replay passed five unit tests and **65.0 seconds headless** (3,471 sampled ticks). The **20.0-second offscreen** replay passed at 720×405 Low (903 sampled frames). The bounded integrated replay checks commerce, aim and recoil, reload transfer, armed retaliation, cash and weapon pickup, showing the dragged driver, taking over and driving the same car, save reload, Dock Run and its payout, defeat and clinic respawn. The replay stages the delivery arrival with the real stolen car and verifies the reward exactly once. Section 1 driving and streaming checks remain in the suite. A 60-frame 1080p Medium drive measured 8.2 FPS on llvmpipe with 115.3 ms median, 151.0 ms p95 and 202.4 ms p99. Baseline and final checks were run headless or offscreen. Game source parsed with Python 3.11 syntax.
+P2 motorbikes, interiors and extra districts are deferred. Native Windows verification and hardware-based preset tuning remain open.
 
-### Needs checking on Windows
+## Known bugs
 
-- **Launch and input.** Run `setup.bat`, `test.bat` and `run.bat` on Windows. Exercise focus loss, mouse capture, firing, pause/resume and F5 save followed by restart.
-- **Audio.** Listen to engine, tire, crash, horn, weapon and crowd ambience through the PC's actual audio output.
-- **Real-GPU FPS.** Run the 1080p Medium benchmark below and drive interactively with F3. Return `logs\perf.log`, including the renderer and completion statistics. The Section 1 target was 45 FPS on Medium. Linux used llvmpipe.
-- **Handling feel.** Check steering, brake and reverse transition, handbrake drift, both vehicle cameras, exit clearance and the slow-car carjacking animation with your preferred input and hardware.
+Some shoulder surfaces show minor overlap in the close aiming pose. See KNOWN_ISSUES.md for retained verification gaps.
 
-### Commands
+## Decisions
+
+The simulation remains fixed-step and independent of rendering. Crime reports with supplied witnesses use that evidence. The existing Section 2 reports generally carried actor and position, so scene queries resolve witnesses and occlusion. The police route toward the last observed position and the scripted replay stages escapes and race arrivals to exercise deterministic transitions. No preset or spawn budget was derived from software-renderer FPS. The launcher, effects caps and runtime evidence stay inside the project.
+
+## Next steps by priority
+
+1. Exercise fresh setup, launch, diagnostics and both save paths on Windows.
+2. Collect real-GPU chase timing and handling/audio feedback. Use those results for hardware-specific tuning.
+3. Consider P2 content if requested.
+
+## Exact commands
 
 | Purpose | Command |
 |---|---|
-| Windows setup and play | `setup.bat` then `run.bat` |
-| Windows suite | `test.bat` |
-| 1080p Medium drive | `run.bat --benchmark --quality Medium --width 1920 --height 1080 --frames 240` |
-| Linux suite | `timeout 95s .venv/bin/python game/tools/launch.py test` |
-| Linux rendered integration | `timeout 55s .venv/bin/python -m game --self-test --offscreen --duration 20 --width 720 --height 405 --quality Low` |
+| Clean Windows setup | `setup.bat` |
+| Windows game | `run.bat` |
+| Windows offscreen suite | `test.bat` |
+| Windows diagnostics | `diag.bat` |
+| Windows 1080p Medium stress | `run.bat --benchmark --scenario chaos --quality Medium --width 1920 --height 1080 --frames 120` |
+| Linux headless | `timeout 95s .venv/bin/python game/tools/launch.py test` |
+| Linux offscreen | `timeout 98s .venv/bin/python game/tools/launch.py test-rendered` |
+| Linux 1080p stress | `timeout 65s .venv/bin/python -m game --benchmark --scenario chaos --quality Medium --width 1920 --height 1080 --frames 72` |
 
-### Next work
+## Time per area
 
-Section 2 P0 is complete. Section 3 is next when requested, starting with witnessed wanted escalation, police pursuit, explosives and further missions. Autonomous NPC group chatting and bench use remain optional Section 2 work. No Windows test has been performed.
-
-The project is at `/workspace/work/HarborCity`. The local transfer package is `_snapshots/HarborCity-Section-2.zip`. The Section 2 P0 checkpoint is `3f50d94`.
-
-### Time
-
-Session start and time checks are in PROGRESS.md. Approximate work by area, overlapping in parallel: pedestrians and data 10 min, traffic 10 min, weapons and audio 10 min, landmarks and HUD 5 min, performance logger 3 min, app integration and replay 13 min.
-
-Optional work and final QA overlapped. Dock Run and its replay took about 4 min. Benches, crowd audio and decals took about 4 min. Final tests, profiling, visual inspection and packaging took about 4 min.
+Start and checkpoint times are in PROGRESS.md. Overlapping work took approximately 5 minutes for Step 0 and launcher/diagnostic review, 7 for wanted and police, 8 for blast and projectile work, 6 for missions, 6 for menu/settings and persistence, 8 for P1 and 8 for staged replays, profiling and release verification.

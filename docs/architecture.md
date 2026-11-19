@@ -17,3 +17,11 @@ Vehicle tuning lives in `game/data/vehicles.json`. Weapons, archetypes, dialogue
 `game.entities.weapons` reads the weapon catalogue, owns inventory and resolves hit rays. `game.fx.combat` pools flash, tracer, impact and decal nodes. Weapon, damage, cash and theft events connect the independent systems. `game.missions.delivery` listens for a carjacking and resolves Dock Run against the saved vehicle identity.
 
 `game.core.performance` appends timestamped frame or simulation statistics to `logs/perf.log`. Replay and benchmark modes share the same fixed-step entry point.
+
+## Pursuit, destruction and persistence
+
+`game.core.wanted` owns witness-gated heat, last sightings, search and cooldown. `game.ai.witnesses` adapts Bullet scenes to those rules. Ground police share traffic navigation, and foot and air units share the preset cap. Weather and blast particles use preset-bounded rendered geometry. Blast causes and damage flow through the event bus.
+
+`game.missions.activities` reads the main job definitions and builds its HUD GPS route from the city road graph. `game.core.savegame` stores atomic manual slots. F5 uses a separate record with the same game state. Active police responders and particles rebuild from restored state.
+
+`setup.bat` delegates to the project-local bootstrap and shared process supervisor. The wrappers use ASCII and CRLF. Diagnostics and game logs are written to logs.

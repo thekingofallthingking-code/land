@@ -63,6 +63,15 @@ class ThirdPersonCamera:
     def shake(self, magnitude):
         self._shake = min(.28, self._shake + magnitude * .055)
 
+    def _shake_offset(self, dt, right):
+        if self._shake <= .001:
+            return Vec3()
+        self._shake_clock += dt * 35
+        wave = right * math.sin(self._shake_clock) + _UP * math.cos(self._shake_clock * 1.27)
+        offset = wave * self._shake
+        self._shake *= math.exp(-5.5 * dt)
+        return offset
+
     def _clip(self, origin, desired, right, ignore):
         ray = desired - origin
         distance = ray.length()
@@ -86,12 +95,12 @@ class ThirdPersonCamera:
             fraction = min(fraction, max(0, hit_fraction - .27 / distance))
         return fraction
 
-    def _update_hood(self, vehicle):
+    def _update_hood(self, vehicle, dt):
         chassis = vehicle.node.get_quat()
         look, _ = _axes(self._hood_yaw)
         elevation = math.radians(self._hood_pitch - 2)
         look = look * math.cos(elevation) + _UP * math.sin(elevation)
-        position = vehicle.hood_position()
+        position = vehicle.hood_position() + self._shake_offset(dt, chassis.get_right())
         self.heading = (vehicle.heading + self._hood_yaw) % 360
         self.node.set_pos(position)
         self.node.look_at(Point3(position + chassis.xform(look)), chassis.xform(_UP))
@@ -108,7 +117,7 @@ class ThirdPersonCamera:
                 self.heading = vehicle.heading
             snap = True
         if vehicle is not None and self.hood_view:
-            self._update_hood(vehicle)
+            self._update_hood(vehicle, dt)
             return
         self._orbit_time = max(0, self._orbit_time - dt)
         sight = float(aiming and vehicle is None)
@@ -146,10 +155,6 @@ class ThirdPersonCamera:
             self._boom_fraction += (safe - self._boom_fraction) * _blend(dt, 7)
         position = pivot + (desired - pivot) * self._boom_fraction
         target = self._pivot + right * (shoulder * .92) - offset * .65
-        if self._shake > .001:
-            self._shake_clock += dt * 35
-            wave = right * math.sin(self._shake_clock) + _UP * math.cos(self._shake_clock * 1.27)
-            position += wave * (self._shake * self._boom_fraction)
-            self._shake *= math.exp(-5.5 * dt)
+        position += self._shake_offset(dt, right) * self._boom_fraction
         self.node.set_pos(position)
         self.node.look_at(Point3(target), _UP)

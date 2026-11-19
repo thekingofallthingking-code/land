@@ -61,7 +61,7 @@ def exercise_pursuit(app):
     _step(app, 3.4, forward=.55)
     assert app.wanted.stars == 3 and app.police.vehicles, "Cruisers did not dispatch during the chase"
     assert any(unit.speed_kph > 2 for unit in app.police.vehicles), "Cruisers stayed parked during pursuit"
-    assert len(app.police.vehicles) + len(app.foot_police.officers) <= app.police_cap
+    assert len(app.police.vehicles) + len(app.foot_police.officers) + app.police.air_count <= app.police_cap
     return car
 
 
@@ -77,7 +77,7 @@ def blast_ahead(app):
     ahead = car.node.get_quat().get_forward() if car else Vec3(0, 1, 0)
     point = target + ahead * 18
     point.z = .45
-    app.explosions.detonate(point, "fuel", app.player)
+    app.explosions.detonate(point, "fuel")
 
 
 def _check_arrest(app):

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from game.core.config import DEFAULT_BINDINGS, LOGS, ROOT, read_json, rebind
@@ -28,3 +29,14 @@ class SaveGameTests(unittest.TestCase):
         self.assertEqual(keys["forward"], "a")
         self.assertEqual(keys["left"], "w")
         self.assertFalse(rebind(keys, "fire", "f5"))
+
+    def test_overlapping_writes_leave_one_complete_record(self):
+        LOGS.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="save-test-", dir=LOGS) as folder:
+            directory = Path(folder).resolve()
+            self.assertTrue(directory.is_relative_to(ROOT))
+            path = directory / "slot-1.json"
+            states = [{"schema": 3, "inventory": [value] * 200} for value in (5, 27)]
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                list(pool.map(lambda state: store_save(path, state), states))
+            self.assertIn(read_json(path)["inventory"], [state["inventory"] for state in states])

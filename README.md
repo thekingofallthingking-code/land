@@ -2,7 +2,7 @@
 
 Harbor City is an original, low-poly 3D action and driving game in a 2.3 × 2.3 km coastal city. Walk, talk to locals, buy equipment, drive or take over an occupied car, and lose police pursuit. The map, people, vehicles, effects and sounds are generated locally.
 
-## Windows 10 or 11
+## Windows 10 or 11 x64
 
 1. Extract the HarborCity folder to `C:\Projects\HarborCity`.
 2. Double-click `setup.bat`. It downloads and checks a project-local Python runtime and installs the pinned packages from official sources. First setup requires network access. Setup writes `logs\setup.log`.
@@ -33,14 +33,14 @@ Use **Save / Load** for three manual slots. Quick saves are separate. Saves reta
 
 Tideway Supply is north of the starting car. E opens the shop, and number keys buy guns, ammunition or armor there. Cash and dropped weapons are picked up on foot. Defeat returns you to Breakwater Clinic. An arrest clears the pursuit and releases you on Breakwater Avenue after a fine.
 
-Witnessed crimes add wanted stars. Police pursue the reported location, deploy foot officers and set roadblocks. Breaking sight starts a search, followed by cooldown. Active objectives and destinations appear on the HUD and minimap.
+Witnessed crimes add wanted stars. Police pursue the reported location, deploy foot officers and set roadblocks. Breaking sight starts a search, followed by cooldown. At four stars tactical vans join. At five stars a helicopter searches with a spotlight. When sight is lost, follow the minimap marker to Lantern Lockup in Foundry Docks and press E inside the bay to lay low. Active objectives and destinations appear on the HUD and minimap.
 
 - **Slipway Escape** begins north of spawn. Get into a pursuit, lose it and deliver the car.
 - **Breakwater Bounty** starts near the shop. Find and defeat the marked gang target.
 - **Exchange Sprint** starts south of the clinic. Drive through the marked gates in order before time runs out.
 - **Dock Run** is the delivery job farther north of the shop.
 
-Lantern Fuel and the barrels near it can trigger a chain of arcade explosions. A damaged car can smoke, catch fire and explode. Leave an overheating vehicle before it fails.
+Lantern Fuel and the barrels near it can trigger a chain of arcade explosions. A damaged car can smoke, catch fire and explode. Leave an overheating vehicle before it fails. Dawn and dusk bring rain, while locals chat in groups and use nearby benches.
 
 ## Performance and verification
 

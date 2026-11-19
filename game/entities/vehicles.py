@@ -118,7 +118,9 @@ def _driver_outline(parent, low, high, belt, roof, nose, windshield_base, windsh
 def _body_mesh(parent, spec, kind):
     width, length = spec["width"] / 2, spec["length"] / 2
     color = spec["color"]
-    belt = 0.51 if kind == "van" else 0.35
+    is_van = kind in ("van", "swat")
+    emergency = kind in ("police", "swat")
+    belt = 0.51 if is_van else 0.35
     roof = spec["height"] - 0.49
     if kind == "sport":
         belt = 0.29
@@ -127,9 +129,10 @@ def _body_mesh(parent, spec, kind):
         "sport": (-0.55, 0.32),
         "van": (-0.89, 0.42),
         "police": (-0.52, 0.31),
+        "swat": (-0.89, 0.42),
     }[kind]
-    rear_slope = 0.12 if kind == "van" else 0.38
-    nose_slope = 0.26 if kind == "van" else 0.49
+    rear_slope = 0.12 if is_van else 0.38
+    nose_slope = 0.26 if is_van else 0.49
     body = _Mesh("body")
     body.loft((
         (-length, width * 0.77, width * 0.82, 0.03, belt - 0.07),
@@ -146,7 +149,7 @@ def _body_mesh(parent, spec, kind):
     body.box((0, length + 0.045, 0.067), (width * 0.32, 0.013, 0.037), TRIM)
     body.box((0, -length - 0.045, 0.112), (0.19, 0.013, 0.065), (0.72, 0.77, 0.64, 1))
     tail, nose = cabin_tail * length, cabin_nose * length
-    low, high = width * 0.90, width * (0.84 if kind == "van" else 0.69)
+    low, high = width * 0.90, width * (0.84 if is_van else 0.69)
     cabin = _Mesh("cab")
     cabin.loft((
         (tail, low, low, belt - 0.01, belt + 0.015),
@@ -165,13 +168,19 @@ def _body_mesh(parent, spec, kind):
                   (-high * 0.91, *windshield_top), (high * 0.91, *windshield_top)), WINDOW)
     rear_base = (tail + rear_slope * (1 - base_slope) - .012, base_z)
     rear_top = (tail + rear_slope * (1 - top_slope) - .012, top_z)
-    windows.face(((-low * 0.86, *rear_base), (low * 0.86, *rear_base),
-                  (high * 0.91, *rear_top), (-high * 0.91, *rear_top)), WINDOW)
+    if kind != "swat":
+        windows.face(((-low * 0.86, *rear_base), (low * 0.86, *rear_base),
+                      (high * 0.91, *rear_top), (-high * 0.91, *rear_top)), WINDOW)
     for side in (-1, 1):
         for y0, y1, top0, top1 in (
             (tail + 0.11, 0.0, tail + rear_slope + 0.095, -0.04),
             (0.07, nose + nose_slope - 0.13, 0.02, nose - 0.065),
         ):
+            if kind == "swat" and y0 < 0:
+                armor = (0.20, 0.29, 0.33, 1)
+                body.box((side * (low + .018), -.83, belt + .22), (.028, .79, .13), armor)
+                body.box((side * (low + .05), -.83, belt + .23), (.007, .38, .022), (.68, .72, .63, 1))
+                continue
             vertices = ((side * (low + 0.007), y0, belt + 0.035),
                         (side * (low + 0.007), y1, belt + 0.035),
                         (side * (high + 0.017), top1, roof - 0.062),
@@ -184,12 +193,17 @@ def _body_mesh(parent, spec, kind):
         if kind == "police":
             body.box((side * (width - 0.01), 0.0, belt - 0.12),
                      (0.017, length * 0.55, 0.064), (0.74, 0.80, 0.80, 1))
-    if kind == "police":
+    if emergency:
         body.box((0, -0.09, roof + 0.095), (width * 0.57, 0.115, 0.055), BUMPER)
         body.box((-width * 0.28, -0.09, roof + 0.125), (width * 0.22, 0.117, 0.048),
                  (0.18, 0.42, 0.96, 1))
         body.box((width * 0.28, -0.09, roof + 0.125), (width * 0.22, 0.117, 0.048),
                  (0.88, 0.19, 0.16, 1))
+    if kind == "swat":
+        body.box((0, length + .11, .04), (width * .72, .092, .079), TRIM)
+        body.box((0, -length - .10, .13), (width * .67, .084, .071), BUMPER)
+        for side in (-1, 1):
+            body.box((side * width * .72, length + .08, .20), (.061, .066, .21), BUMPER)
     body_path = body.attach(parent, "paint")
     cabin.attach(body_path, "cabin")
     windows.attach(parent, "glass")
@@ -282,7 +296,7 @@ class Vehicle:
         physics.attachRigidBody(self.body)
 
         self._paint, self._headlamps, self._taillamps, self._silhouette = _body_mesh(self.node, spec, kind)
-        self._emergency_lamps = self._create_emergency_lamps() if kind == "police" else ()
+        self._emergency_lamps = self._create_emergency_lamps() if kind in ("police", "swat") else ()
         self._emergency_phase = -1
         self._paint.flattenStrong()
         self._headlights_nodes = [self._create_headlight(side) for side in (-1, 1)]
@@ -384,7 +398,7 @@ class Vehicle:
         wheel.setWheelsDampingRelaxation(2.75)
         wheel.setWheelsDampingCompression(4.35)
         wheel.setFrictionSlip(spec["grip"])
-        wheel.setRollInfluence(0.13 if self.kind == "van" else 0.095)
+        wheel.setRollInfluence(0.13 if self.kind in ("van", "swat") else 0.095)
         self._wheel_nodes.append(wheel_node)
 
     def _create_headlight(self, side):

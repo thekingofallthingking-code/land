@@ -46,3 +46,16 @@ class WantedTests(unittest.TestCase):
         self.assertEqual(restored.stars, 1)
         self.assertEqual(restored.last_seen, self.where)
         self.assertEqual(restored.last_seen_time, 97)
+
+    def test_high_alert_and_shelter(self):
+        for elapsed in range(5):
+            self.wanted.report("explosion", self.where, self.witness, elapsed)
+        self.assertEqual(self.wanted.stars, 5)
+        self.assertFalse(self.wanted.take_cover(4))
+        self.wanted.update(10)
+        self.assertTrue(self.wanted.take_cover(10))
+        self.wanted.update(12)
+        self.assertEqual(self.wanted.stars, 4)
+        self.wanted.update(12.5, self.where)
+        self.assertEqual(self.wanted.mode, "pursuit")
+        self.assertEqual(self.wanted.cooldown_interval, RULES["cooldown_seconds"])

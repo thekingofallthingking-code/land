@@ -7,12 +7,14 @@ import math
 
 from panda3d.core import AudioSound, BitMask32, Vec2, Vec3
 
+from game.ai.air_support import Helicopter
 from game.ai.traffic import Traffic, _clamp, _direction, _path_point, _path_progress, _path_sections, _xy
 from game.entities.vehicles import ASSETS, ROOT
 from game.world.roads import CHUNK_SIZE, LANE_OFFSET, ROAD_HALF_WIDTH
 
 RULES = json.loads((ROOT / "game/data/police.json").read_text(encoding="utf-8"))
 TOTAL_CAP = 12
+MAX_STARS = max(int(key) for key in RULES["dispatch"])
 CHASE_MASK = BitMask32.bit(0)
 
 
@@ -36,8 +38,11 @@ class PoliceFleet(Traffic):
 
     def __init__(self, render, physics, city, events, *, audio_loader=None, cap=9, seed=137):
         self.total_cap = min(TOTAL_CAP, max(0, int(cap)))
-        super().__init__(render, physics, city, events, audio_loader=audio_loader, cap=min(4, self.total_cap), seed=seed)
+        ground_cap = min(RULES["dispatch"][str(MAX_STARS)]["cruisers"], self.total_cap)
+        super().__init__(render, physics, city, events, audio_loader=audio_loader, cap=ground_cap, seed=seed)
         self.units: dict = {}
+        self.aircraft: Helicopter | None = None
+        self._air_at = math.inf
         self._route_goal = None
         self._last_stars = 0
         self._last_mode = "clear"
@@ -58,14 +63,27 @@ class PoliceFleet(Traffic):
     def ram_count(self):
         return self._ram_count
 
+    @property
+    def air_count(self):
+        return int(self.aircraft is not None)
+
+    @property
+    def swat_count(self):
+        return sum(car.kind == "swat" for car in self.vehicles)
+
     def is_police(self, vehicle):
         return vehicle in self.units
 
     def has_driver(self, vehicle):
         return vehicle in self.units and not self.units[vehicle].deployed and vehicle.health > 0
 
-    def sighting_sources(self):
-        return tuple((car.position + Vec3(0, 0, .63), car.body) for car in self.vehicles if self.has_driver(car))
+    def sighting_sources(self, target=None):
+        ground = tuple((car.position + Vec3(0, 0, .63), car.body) for car in self.vehicles
+                       if self.has_driver(car))
+        air = self.aircraft
+        if air is not None and air.expire_at == math.inf and (target is None or air.illuminates(target)):
+            return ground + ((air.sight_position, None),)
+        return ground
 
     def _pick_outgoing(self, lane):
         if self._route_goal is not None:
@@ -102,12 +120,40 @@ class PoliceFleet(Traffic):
     def clear(self):
         for car in tuple(self.vehicles):
             self._remove(car)
+        self._remove_air()
+        self._air_at = math.inf
         self._last_stars = 0
         self._last_mode = "clear"
         self._dispatch_at = math.inf
         self._retreat_at = math.inf
         self._block_point = self._block_axis = self._block_node = None
         self._player_vehicle = None
+
+    def _remove_air(self):
+        if self.aircraft is not None:
+            self.aircraft.close()
+            self.aircraft = None
+
+    def _air_step(self, dt, elapsed, mode, target, night, allowed, pending):
+        config = RULES["helicopter"]
+        if not allowed:
+            self._remove_air()
+            return
+        if pending and self.aircraft is None and elapsed >= self._air_at:
+            self.aircraft = Helicopter(self.render, self.physics, target, elapsed, config)
+            self.events.publish("police_air_dispatch", position=self.aircraft.position)
+        if self.aircraft is None:
+            return
+        if mode in ("pursuit", "search"):
+            self.aircraft.expire_at = math.inf
+        else:
+            if self.aircraft.expire_at == math.inf:
+                self.aircraft.expire_at = elapsed + config["depart_seconds"]
+            if elapsed >= self.aircraft.expire_at:
+                self._remove_air()
+                return
+            mode = "depart"
+        self.aircraft.update(dt, elapsed, target, mode, night)
 
     def _load_siren(self, car):
         path = ASSETS / "siren.wav"
@@ -161,7 +207,7 @@ class PoliceFleet(Traffic):
                 return "blocker"
         return "pursuer"
 
-    def _spawn(self, focus, forward, stars, obstacles):
+    def _spawn(self, focus, forward, stars, obstacles, kind="police"):
         role = self._next_role(stars)
         center = self.graph.nearest_intersection(focus.x, focus.y)
         min_gap, max_gap = RULES["spawn_distance"]
@@ -205,7 +251,7 @@ class PoliceFleet(Traffic):
                             score += offset.dot(forward) * (.075 if role == "pursuer" else -.055)
                         points.append((score + self.random.uniform(0.0, 5.0), lane, distance))
         for _, lane, distance in sorted(points, key=lambda row: row[0])[:10]:
-            car = self.spawn_on_lane(lane.origin, lane.destination, distance, "police")
+            car = self.spawn_on_lane(lane.origin, lane.destination, distance, kind)
             if car is None:
                 continue
             unit = Cruiser(role, "enroute", stop, axis, siren=self._load_siren(car), goal=goal)
@@ -249,7 +295,7 @@ class PoliceFleet(Traffic):
         return min(x, y) < ROAD_HALF_WIDTH - 1.0
 
     def _disembark(self, car, unit, focus, foot_count):
-        if unit.deployed or foot_count >= self.total_cap - len(self.vehicles):
+        if unit.deployed or foot_count >= self.total_cap - len(self.vehicles) - self.air_count:
             return 0
         for side in (-1, 1):
             exit_point = car.exit_position(side)
@@ -391,7 +437,7 @@ class PoliceFleet(Traffic):
             state.brake = max(state.brake, .77)
 
     def update(self, dt, elapsed, wanted, focus, *, player_vehicle=None, obstacles=(), pedestrians=(),
-               foot_count=0, night=0.0):
+               foot_count=0, foot_capacity=0, night=0.0):
         if self._closed:
             return
         self.elapsed = elapsed
@@ -400,7 +446,7 @@ class PoliceFleet(Traffic):
         pursuing = wanted.stars > 0 and wanted.mode == "pursuit"
         searching = wanted.stars > 0 and wanted.mode == "search"
         self._player_vehicle = player_vehicle if pursuing else None
-        star = min(3, max(0, wanted.stars))
+        star = min(MAX_STARS, max(0, wanted.stars))
         if pursuing and wanted.last_seen is not None:
             chase = _xy(wanted.last_seen)
         else:
@@ -413,6 +459,10 @@ class PoliceFleet(Traffic):
         if pursuing and (star > self._last_stars or self._last_mode != "pursuit"):
             self._dispatch_at = min(self._dispatch_at, elapsed + limits["delay"])
             self._retreat_at = math.inf
+            if limits["air"] and self.aircraft is None:
+                self._air_at = min(self._air_at, elapsed + RULES["helicopter"]["delay"])
+        if not limits or not limits["air"]:
+            self._air_at = math.inf
         if not pursuing and not searching and self._last_mode not in {"clear", "cooldown"}:
             self._retreat_at = elapsed + RULES["retreat_seconds"]
             self._dispatch_at = math.inf
@@ -437,16 +487,33 @@ class PoliceFleet(Traffic):
                     or (point - focal).length_squared() > RULES["abandon_distance"] ** 2
                     or elapsed >= self._retreat_at or expired_wreck):
                 self._remove(car)
-        excess = len(self.vehicles) + foot_count - self.total_cap
+        reserved_foot = max(foot_count, foot_capacity)
+        can_fly = reserved_foot < self.total_cap
+        air_pending = bool(pursuing and limits["air"] and can_fly)
+        reserve_air = int(can_fly and (self.aircraft is not None or air_pending))
+        excess = len(self.vehicles) + reserved_foot + reserve_air - self.total_cap
         if excess > 0:
             candidates = sorted(self.vehicles, key=lambda car: (
                 self.units[car].deployed, (car.position - focal).length_squared()), reverse=True)
             for car in candidates[:excess]:
                 self._remove(car)
-        room = min(self.cap, self.total_cap - foot_count, limits["cruisers"] if limits else 0)
-        if pursuing and len(self.vehicles) < room and elapsed >= self._dispatch_at:
-            launched = self._spawn(chase, target_forward, star, (*active_obstacles, *self.vehicles))
-            self._dispatch_at = elapsed + (limits["interval"] if launched is not None else 1.0)
+        air_target = Vec3(wanted.last_seen) if (pursuing or searching) and wanted.last_seen is not None else focal
+        air_mode = wanted.mode if limits and limits["air"] else "depart"
+        self._air_step(dt, elapsed, air_mode, air_target, night, can_fly, air_pending)
+        room = min(self.cap, self.total_cap - reserved_foot - reserve_air, limits["cruisers"] if limits else 0)
+        if pursuing and room > 0 and elapsed >= self._dispatch_at:
+            van_goal = min(limits["vans"], max(1, room - 1))
+            needs_van = self.swat_count < van_goal
+            if needs_van and len(self.vehicles) >= room:
+                pool = [car for car in self.vehicles if car.kind != "swat"]
+                if pool:
+                    farthest = max(pool, key=lambda car: (car.position - focal).length_squared())
+                    if (farthest.position - focal).length_squared() >= 18 ** 2:
+                        self._remove(farthest)
+            if len(self.vehicles) < room:
+                kind = "swat" if needs_van else "police"
+                launched = self._spawn(chase, target_forward, star, (*active_obstacles, *self.vehicles), kind)
+                self._dispatch_at = elapsed + (limits["interval"] if launched is not None else 1.0)
         all_cars = tuple(self.vehicles) + active_obstacles
         for car in self.vehicles:
             unit = self.units[car]
