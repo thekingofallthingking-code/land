@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+logs/*
+!logs/.gitkeep
+assets_generated/*
+!assets_generated/.gitkeep
+screenshots/
+config.local.json
+saves/
+_snapshots/
+/settings.json*
+/save.json*

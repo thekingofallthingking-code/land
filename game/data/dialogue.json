@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "lines": {
+    "commuter": {
+      "calm": ["Good evening. You heading toward the water?", "The lights take forever at this corner."],
+      "angry": ["Give me some room.", "I've got nothing to say to you."]
+    },
+    "dockworker": {
+      "calm": ["Wind's picking up by the slips.", "I can tell what shift it is by the gulls."],
+      "angry": ["Back off, would you?", "I know your face now."]
+    },
+    "local": {
+      "calm": ["Take the park road for the view.", "City's got a different hum after dark."],
+      "angry": ["Keep walking.", "You're starting trouble."]
+    }
+  }
+}

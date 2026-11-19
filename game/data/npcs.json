@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "archetypes": [
+    {"id": "commuter", "walk_mps": 1.45, "run_mps": 4.30, "courage": 0.2, "dialogue": "commuter"},
+    {"id": "dockworker", "walk_mps": 1.25, "run_mps": 3.95, "courage": 0.5, "dialogue": "dockworker"},
+    {"id": "local", "walk_mps": 1.15, "run_mps": 3.75, "courage": 0.75, "dialogue": "local"}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "weapons": [
+    {"id": "pistol", "slot": 1, "name": "Breakwater 9", "damage": 24, "capacity": 12, "rounds_per_second": 4.2, "reload_seconds": 1.55, "spread_degrees": 1.4, "recoil_degrees": 2.5, "pellets": 1},
+    {"id": "smg", "slot": 2, "name": "Kelpworks M3", "damage": 14, "capacity": 28, "rounds_per_second": 10, "reload_seconds": 1.9, "spread_degrees": 2.5, "recoil_degrees": 1.4, "pellets": 1},
+    {"id": "shotgun", "slot": 3, "name": "Sound Pump", "damage": 12, "capacity": 6, "rounds_per_second": 1.15, "reload_seconds": 2.7, "spread_degrees": 6.0, "recoil_degrees": 5.8, "pellets": 9},
+    {"id": "rifle", "slot": 4, "name": "Tern A4", "damage": 25, "capacity": 24, "rounds_per_second": 7.3, "reload_seconds": 2.1, "spread_degrees": 1.5, "recoil_degrees": 1.9, "pellets": 1},
+    {"id": "melee", "slot": 5, "name": "Unarmed", "damage": 18, "reach_meters": 1.6, "rounds_per_second": 1.7}
+  ]
+}

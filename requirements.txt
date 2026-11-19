@@ -1,0 +1,5 @@
+panda3d==1.10.16
+panda3d-simplepbr==0.13.1
+numpy==2.2.6
+pillow==11.3.0
+typing-extensions==4.15.0
