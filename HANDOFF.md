@@ -2,7 +2,7 @@ SECTION 3 PARTIAL
 
 # Harbor City handoff
 
-Section 3 Step 0 passed on Linux. The five-unit baseline and 65.0-second headless replay passed. Added docs/SECTION_3.md and a fresh-PC bootstrap that downloads and verifies official CPython and pip inside the project. The Windows execution path remains unverified. Native GPU results were unavailable. Wanted 1–3, witness gating, search and cooldown passed eight unit tests and a bounded integrated headless run. The next launching checkpoint includes cruisers, foot officers, blasts, three extra missions, settings, manual slots and verified short integration. Full rendered acceptance and the chaos profile are pending. The prior Section 2 verification follows.
+Section 3 Step 0 passed on Linux. The five-unit baseline and 65.0-second headless replay passed. Added docs/SECTION_3.md and a fresh-PC bootstrap that downloads and verifies official CPython and pip inside the project. The Windows execution path remains unverified. Native GPU results were unavailable. Wanted 1–3, witness gating, search and cooldown passed eight unit tests and a bounded integrated headless run. The next launching checkpoint includes cruisers, foot officers, blasts, three extra missions, settings, manual slots and verified short integration. The P0 gate passed 17 unit tests, both 65-second Linux replay modes, and the three-star Medium 1080p profile. The profile measured 6.1 average FPS on llvmpipe with 4 cruisers, 4 foot officers, 40 blast particles and 2 debris at finish. No tuning was based on this software result. P1 begins from this verified checkpoint. The prior Section 2 verification follows.
 
 ## Section 2 — The City Comes Alive
 

@@ -173,9 +173,10 @@ def run_self_test(app, duration):
         time.sleep(max(0., tick_start + STEP - time.perf_counter()))
     assert tick_count > duration * 7, "Simulation throughput fell below 7 updates per second"
     duration_run = time.perf_counter() - started
+    rate_label = "uncapped updates/s" if app.headless else "measured FPS"
     print(f"SELF-TEST PASS | {duration_run:.1f} s | {tick_count} scripted ticks | "
           f"{tick_count / duration_run:.1f} scripted ticks/s | "
-          f"{1 / statistics.mean(samples):.1f} uncapped updates/s | "
+          f"{1 / statistics.mean(samples):.1f} {rate_label} | "
           f"{max_chunks} peak chunks | {len(app.vehicles)} parked/owned | {len(app.traffic.vehicles)} traffic | "
           f"{len(app.peds.people)} pedestrians | {len(app.police.vehicles) + len(app.foot_police.officers)} police | "
           f"{app.explosions.blast_count} blasts | 1 player", flush=True)

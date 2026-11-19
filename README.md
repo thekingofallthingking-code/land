@@ -1,43 +1,62 @@
 # Harbor City
 
-A standalone Python driving sandbox set in a procedurally built coastal city. Walk the sidewalks, meet the locals, buy equipment, and take a car through the Exchange Quarter, Westbank, Foundry Docks, Juniper Park and South Strand. The city covers 2.304 km on each side.
+Harbor City is an original, low-poly 3D action and driving game in a 2.3 × 2.3 km coastal city. Walk, talk to locals, buy equipment, drive or take over an occupied car, and lose police pursuit. The map, people, vehicles, effects and sounds are generated locally.
 
-## Windows
+## Windows 10 or 11
 
-1. Extract the project to `C:\Projects\HarborCity`.
-2. Double-click `setup.bat` with 64-bit Python 3.12 or 3.11 installed. Setup creates a local environment, installs pinned packages from PyPI and synthesizes the audio. It writes `logs\setup.log`.
-3. Open `run.bat`, then select **Play** or press Enter.
-4. Run `test.bat` for the unit tests and a bounded 65-second simulation replay.
-
-Tideway Supply is a short walk north of the starting car. Press E near its shopkeeper, then use 1–5 to buy equipment. F enters a parked car or starts a carjacking when an occupied car is stopped or moving slowly. Defeat returns you to Breakwater Clinic. To start Dock Run, follow the minimap diamond to the gold marker north of the shop and press E. Take a car with a driver and stop it in the Foundry Docks bay.
+1. Extract the HarborCity folder to `C:\Projects\HarborCity`.
+2. Double-click `setup.bat`. It downloads and checks a project-local Python runtime and installs the pinned packages from official sources. First setup requires network access. Setup writes `logs\setup.log`.
+3. Double-click `run.bat` and choose **Play**. Use **Settings** to select Low, Medium or High and remap controls. Restart to apply a graphics preset.
+4. Run `test.bat` for unit tests and a bounded 65-second offscreen replay. Run `diag.bat` for environment, dependency and graphics diagnostics in `logs\diag.log`.
 
 ## Controls
 
-| Input | On foot | Driving |
-|---|---|---|
-| W / S | Forward / back | Accelerate / brake and reverse |
-| A / D | Strafe | Steer |
-| Mouse | Orbit camera | Orbit chase camera or look from hood |
-| Shift | Sprint | |
-| Space | Jump | Handbrake |
-| F | Enter nearby car | Exit at low speed |
-| C | | Toggle chase / hood |
-| E | Talk, shop or close dialogue | |
-| RMB / LMB | Aim / fire or swing | |
-| R | Reload | |
-| 1–5 | Select weapon or item in a shop | |
-| Esc | Pause / resume | Pause / resume |
-| F1 / F3 | Controls / debug | Controls / debug |
-| F5 | Save | Save |
+| Input | Action |
+|---|---|
+| W / A / S / D | Move, accelerate, steer and brake/reverse |
+| Mouse | Look |
+| Shift | Sprint |
+| Space | Jump on foot or handbrake in a car |
+| F | Enter or exit a car. Approach a slow or stopped occupied car to take it over |
+| E | Talk, shop, accept a job or close dialogue |
+| RMB / LMB | Aim and fire or swing |
+| R | Reload |
+| 1–5 | Pistol, SMG, shotgun, rifle, melee |
+| 6 / 7 | Grenade or rocket launcher once purchased |
+| C | Switch vehicle camera |
+| Esc | Close a panel or pause |
+| F1 / F3 / F5 | Controls, debug readout, quicksave |
 
-Quicksaves record the player's state, inventory, time, and parked or stolen vehicles in `save.json`. The title screen restores a valid save when entering the city. The quality choice is written to `settings.json` on first launch. Use `run.bat --quality Low` for a one-run override.
+Use **Save / Load** for three manual slots. Quick saves are separate. Saves retain inventory, armor, money, parked and stolen cars, job progress, wanted state and damaged explosive props.
 
-## 1080p driving benchmark
+## The city
 
-Run `run.bat --benchmark --quality Medium --width 1920 --height 1080 --frames 240` from the project directory. This performs a warmed, deterministic drive in an offscreen buffer and logs average FPS, median, 95th-percentile and 99th-percentile frame times, and the graphics renderer to `logs\perf.log`. For a live check, use `run.bat --quality Medium --width 1920 --height 1080` and press F3 while driving.
+Tideway Supply is north of the starting car. E opens the shop, and number keys buy guns, ammunition or armor there. Cash and dropped weapons are picked up on foot. Defeat returns you to Breakwater Clinic. An arrest clears the pursuit and releases you on Breakwater Avenue after a fine.
 
-## Development
+Witnessed crimes add wanted stars. Police pursue the reported location, deploy foot officers and set roadblocks. Breaking sight starts a search, followed by cooldown. Active objectives and destinations appear on the HUD and minimap.
 
-Run `run.bat --offscreen --play --quality Medium --width 1280 --height 720 --frames 90 --screenshot preview.png` for a bounded offscreen capture. Generated sounds and maps live under `assets_generated`. The game needs no asset downloads.
+- **Slipway Escape** begins north of spawn. Get into a pursuit, lose it and deliver the car.
+- **Breakwater Bounty** starts near the shop. Find and defeat the marked gang target.
+- **Exchange Sprint** starts south of the clinic. Drive through the marked gates in order before time runs out.
+- **Dock Run** is the delivery job farther north of the shop.
 
-On Linux, use `timeout 600s python3 game/tools/launch.py setup` followed by `timeout 95s .venv/bin/python game/tools/launch.py test`. Development verification and section status are in `HANDOFF.md` and `KNOWN_ISSUES.md`.
+Lantern Fuel and the barrels near it can trigger a chain of arcade explosions. A damaged car can smoke, catch fire and explode. Leave an overheating vehicle before it fails.
+
+## Performance and verification
+
+```bat
+run.bat --benchmark --quality Medium --width 1920 --height 1080 --frames 240
+run.bat --benchmark --scenario chaos --quality Medium --width 1920 --height 1080 --frames 120
+```
+
+Each game run appends timing to `logs\perf.log`. Render entries include renderer, driver, OpenGL version, average and minimum FPS, frame-time percentiles and entity counts. Headless runs report simulation timing. F3 shows live frame rate and local population. See HANDOFF.md for Linux evidence and Windows checks.
+
+### Linux development
+
+```sh
+timeout 600s python3 game/tools/launch.py setup
+timeout 95s .venv/bin/python game/tools/launch.py test
+timeout 98s .venv/bin/python game/tools/launch.py test-rendered
+```
+
+Game assets are procedural. `docs/architecture.md` maps the runtime and `docs/SECTION_3.md` records the final-section specification.
