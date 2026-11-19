@@ -3,13 +3,16 @@
 import math
 from pathlib import Path
 
+from direct.gui import DirectGuiGlobals as DGG
 from direct.gui.DirectButton import DirectButton
 from direct.gui.OnscreenText import OnscreenText
 from panda3d.core import (
     CardMaker, Filename, Geom, GeomNode, GeomTriangles, GeomVertexData,
-    GeomVertexFormat, GeomVertexWriter, Point2, SamplerState, TextNode, TextureStage,
+    GeomVertexFormat, GeomVertexWriter, LineSegs, Point2, SamplerState, TextNode, TextureStage,
     TransparencyAttrib,
 )
+
+from game.core.config import PRESETS
 
 PAPER = (0.96, 0.95, 0.88, 1)
 PALE = (0.76, 0.83, 0.80, 1)
@@ -18,6 +21,8 @@ MINT = (0.62, 0.93, 0.80, 1)
 ORANGE = (1.00, 0.57, 0.31, 1)
 ARMOR = (0.49, 0.76, 1.00, 1)
 DARK = (0.035, 0.08, 0.10, 0.94)
+CONTROL_DARK = (.09, .17, .20, 1)
+CONTROL_HOVER = (.16, .26, .28, 1)
 NORTH = 1152.0
 MAP_SIZE = 0.302
 WORDMARK = {
@@ -36,6 +41,7 @@ WORDMARK = {
     "S": (((.70, .88), (.57, 1), (.16, 1), (0, .84), (0, .69), (.16, .51), (.53, .51),
            (.70, .33), (.70, .15), (.55, 0), (.15, 0), (0, .14)),),
     "T": (((.00, 1), (.70, 1)), ((.35, 1), (.35, 0))),
+    "U": (((0, 1), (0, .18), (.17, 0), (.53, 0), (.70, .18), (.70, 1)),),
     "W": (((0, 1), (.14, 0), (.36, .56), (.57, 0), (.72, 1)),),
     "Y": (((0, 1), (.35, .49), (.70, 1)), ((.35, .49), (.35, 0))),
 }
@@ -74,6 +80,42 @@ def _map_arrow(parent):
     direction.set_two_sided(True)
     direction.set_color(*ORANGE)
     return direction
+
+
+def _star(parent, x, z):
+    data = GeomVertexData("wanted star", GeomVertexFormat.get_v3(), Geom.UH_static)
+    vertices = GeomVertexWriter(data, "vertex")
+    vertices.add_data3(0, 0, 0)
+    triangles = GeomTriangles(Geom.UH_static)
+    for index in range(10):
+        angle = math.pi * index / 5
+        radius = .022 if index % 2 == 0 else .010
+        vertices.add_data3(math.sin(angle) * radius, 0, math.cos(angle) * radius)
+        triangles.add_vertices(0, index + 1, (index + 1) % 10 + 1)
+    geometry = Geom(data)
+    geometry.add_primitive(triangles)
+    mesh = GeomNode("wanted star")
+    mesh.add_geom(geometry)
+    star = parent.attach_new_node(mesh, 2)
+    star.set_pos(x, 0, z)
+    star.set_two_sided(True)
+    return star
+
+
+def _clip_minimap_segment(x0, z0, x1, z1):
+    """Clip a segment to the map card, keeping endpoints on its boundary."""
+    dx, dz = x1 - x0, z1 - z0
+    lower, upper = 0.0, 1.0
+    for distance, slope in ((x0, dx), (MAP_SIZE - x0, -dx), (z0, dz), (MAP_SIZE - z0, -dz)):
+        if slope > 0:
+            lower = max(lower, -distance / slope)
+        elif slope < 0:
+            upper = min(upper, -distance / slope)
+        elif distance < 0:
+            return None
+    if lower > upper:
+        return None
+    return x0 + lower * dx, z0 + lower * dz, x0 + upper * dx, z0 + upper * dz
 
 
 def _gradient(parent):
@@ -143,7 +185,8 @@ def _set_text(label, value):
 class Overlay:
     """Aspect-aware presentation of the app state and the current player instruments."""
 
-    def __init__(self, base, on_play, on_resume, on_quit, minimap_path):
+    def __init__(self, base, on_play, on_resume, on_quit, minimap_path, *,
+                 on_quality=None, on_rebind=None, on_save=None, on_load=None):
         self.base = base
         self.sans = base.loader.load_font("cmss12")
         self.mono = base.loader.load_font("cmtt12")
@@ -156,9 +199,20 @@ class Overlay:
         self.dialogue_open = False
         self.shop_open = False
         self.wasted_open = False
+        self.busted_open = False
         self.aiming = False
         self.armed = False
         self.driving = False
+        self.panel = None
+        self.rebinding = None
+        self.binding_rows = {}
+        self.binding_labels = {}
+        self.fire_key = "LMB"
+        self.reload_key = "R"
+        self.on_quality = on_quality
+        self.on_rebind = on_rebind
+        self.on_save = on_save
+        self.on_load = on_load
 
         self.menu = self._root(base.a2dTopLeft, "main menu")
         self.paused = self._root(base.a2dTopLeft, "pause menu")
@@ -176,6 +230,9 @@ class Overlay:
         self.dialogue = self._root(base.a2dBottomCenter, "conversation", sort=35)
         self.shop = self._root(base.a2dBottomCenter, "shop", sort=35)
         self.wasted = self._root(base.aspect2d, "wasted", sort=65)
+        self.busted = self._root(base.aspect2d, "busted", sort=65)
+        self.settings = self._root(base.aspect2d, "settings", sort=70)
+        self.saves = self._root(base.aspect2d, "save slots", sort=70)
         self.hud = (
             self.hud_top_left, self.hud_top_right, self.hud_top_center, self.hud_bottom_left,
             self.hud_bottom_right, self.hud_bottom_center,
@@ -187,6 +244,8 @@ class Overlay:
         self._build_debug()
         self._build_combat()
         self._build_dialogue()
+        self._build_settings()
+        self._build_saves()
         self.set_state("menu")
 
     def _root(self, anchor, name, *, sort=0):
@@ -223,9 +282,15 @@ class Overlay:
         _text(self.paused, "HARBOR CITY", .138, -.635, .041, MINT, self.mono)
 
         for parent, label, action in ((self.menu, "Play", on_play), (self.paused, "Resume", on_resume)):
+            buttons = []
+            if self.on_load or (parent == self.paused and self.on_save):
+                buttons.append(("Load game" if parent == self.menu else "Save / load", self.open_saves))
+            if self.on_quality or self.on_rebind:
+                buttons.append(("Settings", self.open_settings))
+            buttons.extend((("Controls", self.toggle_help), ("Quit", on_quit)))
             self._button(parent, label, -.938, action, primary=True)
-            self._button(parent, "Controls", -1.068, self.toggle_help)
-            self._button(parent, "Quit", -1.198, on_quit)
+            for index, (title, invoke) in enumerate(buttons):
+                self._button(parent, title, -1.068 - index * .130, invoke)
 
     def _build_hud(self, minimap_path):
         parent = self.hud_top_left
@@ -250,6 +315,12 @@ class Overlay:
         self.armor_bar = parent.attach_new_node("armor bar", 2)
         self.armor_bar.set_pos(-.196, 0, -.201)
         _panel(self.armor_bar, "armor fill", 0, .125, 0, .017, ARMOR)
+        self.wanted_group = parent.attach_new_node("wanted status")
+        _panel(self.wanted_group, "wanted backdrop", -.398, -.048, -.365, -.243, DARK)
+        _panel(self.wanted_group, "wanted stripe", -.398, -.048, -.249, -.243, ORANGE)
+        self.wanted_stars = [_star(self.wanted_group, -.347 + .060 * index, -.286) for index in range(3)]
+        self.wanted_message = _text(self.wanted_group, "", -.376, -.342, .038, ORANGE, self.sans, mutable=True)
+        self.wanted_group.hide()
 
         self.objective_group = self.hud_top_center.attach_new_node("objective")
         _panel(self.objective_group, "objective backdrop", -.451, .451, -.148, -.048, DARK)
@@ -281,6 +352,9 @@ class Overlay:
             self.map_image.set_tex_scale(self.map_stage, self.map_zoom, self.map_zoom)
         else:
             self.map_image.set_color(.13, .28, .31, 1)
+        self.route_layer = self.map_origin.attach_new_node(GeomNode("directions"), 2)
+        self.route_points = ()
+        self.route_corner = (0, 0)
         self.map_arrow = _map_arrow(self.map_origin)
         self.map_waypoint = self.map_origin.attach_new_node("destination ping", 3)
         self.map_waypoint.set_r(45)
@@ -318,22 +392,28 @@ class Overlay:
         _text(self.help, "Controls", -.722, .536, .080, PAPER, self.sans)
         columns = (
             (-.722, "ON FOOT", (
-                ("WASD", "Move"), ("MOUSE", "Look"), ("SHIFT", "Sprint"), ("SPACE", "Jump"),
-                ("F", "Enter / Steal vehicle"), ("E", "Talk / Shop"),
+                ("WASD", "Move", "walk"), ("MOUSE", "Look", ""), ("SHIFT", "Sprint", "sprint"),
+                ("SPACE", "Jump", "jump"), ("F", "Enter / Steal vehicle", "interact"),
+                ("E", "Talk / Shop", "talk"),
             )),
             (-.207, "DRIVING", (
-                ("W / S", "Accelerate / Reverse"), ("A / D", "Steer"), ("SPACE", "Handbrake"),
-                ("C", "Change camera"), ("F", "Exit vehicle"),
+                ("W / S", "Accelerate / Reverse", "drive"), ("A / D", "Steer", "steer"),
+                ("SPACE", "Handbrake", "jump"), ("C", "Change camera", "vehicle_view"),
+                ("F", "Exit vehicle", "interact"),
             )),
             (.327, "COMBAT", (
-                ("RMB", "Aim"), ("LMB", "Attack"), ("R", "Reload"), ("1-5", "Select weapon"),
+                ("RMB", "Aim", "aim"), ("LMB", "Attack", "fire"), ("R", "Reload", "reload"),
+                ("1-7", "Select weapon", ""),
             )),
         )
+        self.help_keys = {}
         for x, heading, controls in columns:
             _text(self.help, heading, x, .428, .037, MINT, self.mono)
-            for index, (key, action) in enumerate(controls):
+            for index, (key, action, setting) in enumerate(controls):
                 z = .344 - index * .073
-                _text(self.help, key, x, z, .034, PAPER, self.mono)
+                key_label = _text(self.help, key, x, z, .034, PAPER, self.mono, mutable=bool(setting))
+                if setting:
+                    self.help_keys.setdefault(setting, []).append(key_label)
                 _text(self.help, action, x + .167, z, .036, PALE, self.sans)
 
         _panel(self.help, "controls divider", -.722, .724, -.112, -.110, (.23, .36, .37, 1))
@@ -348,12 +428,164 @@ class Overlay:
         _panel(self.debug, "debug backdrop", .048, .636, -.552, -.201, (.024, .057, .075, .95))
         self.debug_text = _text(self.debug, "", .074, -.258, .033, MINT, self.mono, mutable=True)
 
+    def _menu_control(self, parent, title, left, right, height, command, *args, align=TextNode.A_center):
+        horizontal = (right - left) / 2
+        button = DirectButton(
+            parent=parent, pos=(left + horizontal, 0, height), text=title,
+            text_font=self.sans, text_scale=.042, text_fg=PAPER, text_align=align,
+            text_pos=(0 if align == TextNode.A_center else -.95 * horizontal, -.013),
+            frameSize=(-horizontal, horizontal, -.035, .035),
+            frameColor=(CONTROL_DARK, (.09, .14, .17, 1), CONTROL_HOVER, (.065, .12, .145, 1)),
+            relief=1, borderWidth=(0, 0), pressEffect=False, sortOrder=8,
+            command=command, extraArgs=list(args), state=DGG.NORMAL if command else DGG.DISABLED,
+        )
+        self.buttons.append(button)
+        return button
+
+    def _build_settings(self):
+        _panel(self.settings, "settings backdrop", -.72, .72, -.825, .827, (.027, .065, .081, .99))
+        _panel(self.settings, "settings accent", -.72, .72, .820, .827, MINT)
+        _text(self.settings, "Settings", -.641, .669, .085, PAPER, self.sans)
+        _text(self.settings, "Graphics quality", -.641, .531, .045, MINT, self.sans)
+        self.quality_controls = {}
+        for index, preset in enumerate(PRESETS):
+            left = -.641 + .277 * index
+            self.quality_controls[preset] = self._menu_control(
+                self.settings, preset, left, left + .259, .439, self.on_quality, preset,
+            )
+        _text(self.settings, "Controls", -.641, .293, .045, MINT, self.sans)
+        self.rebind_prompt = _text(
+            self.settings, "", .627, .293, .032, ORANGE, self.sans, align=TextNode.A_right, mutable=True,
+        )
+        _panel(self.settings, "controls backdrop", -.641, .641, -.467, .218, (.045, .09, .105, 1))
+        self.binding_container = self.settings.attach_new_node("key bindings", 7)
+        self._menu_control(self.settings, "Back", -.641, -.370, -.715, self.close_panel)
+        self.settings_message = _text(
+            self.settings, "", .620, -.731, .036, PALE, self.sans, align=TextNode.A_right, mutable=True,
+        )
+
+    def _build_saves(self):
+        _panel(self.saves, "save slots backdrop", -.72, .72, -.49, .49, (.027, .065, .081, .99))
+        _panel(self.saves, "save slots accent", -.72, .72, .483, .49, MINT)
+        self.saves_title = _text(self.saves, "Save slots", -.641, .343, .085, PAPER, self.sans, mutable=True)
+        self.save_slots = {}
+        for slot in range(1, 4):
+            z = .174 - (slot - 1) * .164
+            _panel(self.saves, "save slot card", -.642, .642, z - .052, z + .068, (.070, .125, .148, 1))
+            _text(self.saves, f"Slot {slot}", -.609, z + .019, .049, PAPER, self.sans)
+            caption = _text(self.saves, "Empty", -.609, z - .032, .036, PALE, self.sans, mutable=True)
+            save = self._menu_control(self.saves, "Save", .194, .391, z + .006, self.on_save, slot)
+            load = self._menu_control(self.saves, "Load", .411, .608, z + .006, self.on_load, slot)
+            load["state"] = DGG.DISABLED
+            load["text_fg"] = MUTED
+            self.save_slots[slot] = caption, save, load
+        self._menu_control(self.saves, "Back", -.641, -.370, -.370, self.close_panel)
+        self.saves_message = _text(
+            self.saves, "", .620, -.385, .036, ORANGE, self.sans, align=TextNode.A_right, mutable=True,
+        )
+
+    def set_settings(self, quality, bindings, labels=None, *, message=""):
+        labels = labels or {}
+        for preset, button in self.quality_controls.items():
+            selected = quality == preset
+            button["frameColor"] = (MINT if selected else CONTROL_DARK,
+                                    (.09, .14, .17, 1), CONTROL_HOVER, (.065, .12, .145, 1))
+            button["text_fg"] = (.04, .10, .11, 1) if selected else PAPER
+        _set_text(self.settings_message, message)
+        self.binding_labels = {action: labels.get(action, action.replace("_", " ").title()) for action in bindings}
+        if tuple(bindings) != tuple(self.binding_rows):
+            for button, _ in self.binding_rows.values():
+                button.destroy()
+                self.buttons.remove(button)
+            self.binding_rows.clear()
+            rows = (len(bindings) + 1) // 2
+            spacing = min(.104, .64 / max(1, rows))
+            for index, action in enumerate(bindings):
+                left = -.618 if index < rows else .012
+                z = .142 - spacing * (index % rows)
+                button = self._menu_control(
+                    self.binding_container, self.binding_labels[action], left, left + .604, z, self.on_rebind, action,
+                    align=TextNode.A_left,
+                )
+                key = _text(button, "", .272, -.013, .036, MINT, self.mono,
+                            align=TextNode.A_right, mutable=True)
+                self.binding_rows[action] = button, key
+        for action, binding in bindings.items():
+            button, key = self.binding_rows[action]
+            button["text"] = self.binding_labels[action]
+            _set_text(key, self._control_label(binding))
+        self._update_help_keys(bindings)
+        self.fire_key = self._control_label(bindings.get("fire", "mouse1"))
+        self.reload_key = self._control_label(bindings.get("reload", "r"))
+        talk_key = self._control_label(bindings.get("talk", "e"))
+        for prompt in (self.dialogue_exit, self.shop_exit):
+            _set_text(prompt, f"{talk_key}  CLOSE")
+
+    def _update_help_keys(self, bindings):
+        groups = {
+            "walk": ("forward", "left", "back", "right"),
+            "drive": ("forward", "back"),
+            "steer": ("left", "right"),
+        }
+        for setting, labels in self.help_keys.items():
+            actions = groups.get(setting, (setting,))
+            if all(action in bindings for action in actions):
+                keys = [self._control_label(bindings[action]) for action in actions]
+                name = "WASD" if keys == ["W", "A", "S", "D"] else " / ".join(keys)
+                for label in labels:
+                    _set_text(label, name)
+                    label.setTextScale(min(.034, .276 / len(name)))
+
+    @staticmethod
+    def _control_label(key):
+        labels = {"mouse1": "LMB", "mouse2": "MMB", "mouse3": "RMB", "escape": "ESC",
+                  "lshift": "L SHIFT", "rshift": "R SHIFT",
+                  "arrow_up": "UP", "arrow_down": "DOWN", "arrow_left": "LEFT", "arrow_right": "RIGHT"}
+        return labels.get(key, str(key).upper().replace("_", " "))
+
+    def set_rebinding(self, action=None, message=""):
+        self.rebinding = action
+        if action and not message:
+            message = f"Press a key for {self.binding_labels.get(action, action)}"
+        _set_text(self.rebind_prompt, message)
+
+    def set_slots(self, slots, *, message=""):
+        for slot, (caption, _, load) in self.save_slots.items():
+            description = slots.get(slot)
+            _set_text(caption, str(description) if description else "Empty")
+            enabled = bool(description and self.on_load)
+            load["state"] = DGG.NORMAL if enabled else DGG.DISABLED
+            load["text_fg"] = PAPER if enabled else MUTED
+        _set_text(self.saves_message, message)
+
+    def open_settings(self):
+        self.panel = "settings"
+        self.help_visible = False
+        self.set_rebinding()
+        self._sync_visibility()
+
+    def open_saves(self):
+        self.panel = "saves"
+        self.help_visible = False
+        _set_text(self.saves_title, "Load game" if self.state == "menu" else "Save / load")
+        for _, save, _ in self.save_slots.values():
+            save.show() if self.state == "paused" and self.on_save else save.hide()
+        self._sync_visibility()
+
+    def close_panel(self):
+        if self.panel is None:
+            return False
+        self.panel = None
+        self.set_rebinding()
+        self._sync_visibility()
+        return True
+
     def _build_combat(self):
         parent = self.combat_hud
         _panel(parent, "weapon backdrop", -.500, -.048, .048, .271, DARK)
         _panel(parent, "weapon stripe", -.500, -.048, .266, .271, ORANGE)
         self.weapon_name = _text(parent, "", -.459, .213, .042, PAPER, self.sans, mutable=True)
-        _text(parent, "1-5", -.074, .214, .032, MINT, self.mono, align=TextNode.A_right)
+        _text(parent, "1-7", -.074, .214, .032, MINT, self.mono, align=TextNode.A_right)
         self.ammo_text = _text(parent, "", -.459, .101, .082, PAPER, self.mono, mutable=True)
         self.ammo_status = _text(parent, "", -.074, .168, .030, ORANGE, self.mono,
                                  align=TextNode.A_right, mutable=True)
@@ -378,42 +610,54 @@ class Overlay:
         _wordmark(self.wasted, "WASTED", -.294, -.019, height=.112, color=ORANGE)
         self.wasted_countdown = _text(self.wasted, "", 0, -.111, .053, PAPER, self.sans,
                                       align=TextNode.A_center, mutable=True)
+        _panel(self.busted, "busted backdrop", -.88, .88, -.215, .217, (.024, .04, .065, .95))
+        _panel(self.busted, "busted stripe", -.88, .88, .209, .217, ARMOR)
+        _wordmark(self.busted, "BUSTED", -.294, -.019, height=.112, color=ARMOR)
+        self.busted_countdown = _text(self.busted, "", 0, -.111, .053, PAPER, self.sans,
+                                      align=TextNode.A_center, mutable=True)
 
     def _build_dialogue(self):
         _panel(self.dialogue, "dialogue backdrop", -.580, .580, .250, .579, DARK)
         _panel(self.dialogue, "dialogue stripe", -.580, .580, .573, .579, MINT)
         self.dialogue_speaker = _text(self.dialogue, "", -.539, .505, .055, MINT, self.sans, mutable=True)
         self.dialogue_line = _text(self.dialogue, "", -.539, .430, .045, PAPER, self.sans, mutable=True, wrap=23)
-        _text(self.dialogue, "E  CLOSE", .541, .283, .031, ORANGE, self.mono, align=TextNode.A_right)
+        self.dialogue_exit = _text(self.dialogue, "E  CLOSE", .541, .283, .031, ORANGE, self.mono,
+                                   align=TextNode.A_right, mutable=True)
 
-        _panel(self.shop, "shop backdrop", -.606, .606, .250, 1.011, DARK)
-        _panel(self.shop, "shop stripe", -.606, .606, 1.003, 1.011, ORANGE)
-        self.shop_speaker = _text(self.shop, "", -.564, .927, .060, MINT, self.sans, mutable=True)
-        self.shop_line = _text(self.shop, "", -.564, .852, .041, PAPER, self.sans, mutable=True, wrap=27)
+        _panel(self.shop, "shop backdrop", -.606, .606, .250, 1.164, DARK)
+        _panel(self.shop, "shop stripe", -.606, .606, 1.156, 1.164, ORANGE)
+        self.shop_speaker = _text(self.shop, "", -.564, 1.080, .060, MINT, self.sans, mutable=True)
+        self.shop_line = _text(self.shop, "", -.564, 1.005, .041, PAPER, self.sans, mutable=True, wrap=27)
         self.shop_fields = []
-        for index in range(5):
-            z = .678 - index * .073
+        for index in range(7):
+            z = .824 - index * .073
             row = self.shop.attach_new_node("shop item", 2)
             _panel(row, "shop item shade", -.565, .565, z - .021, z + .035, (.087, .145, .16, 1))
             key = _text(row, "", -.540, z, .038, ORANGE, self.mono, mutable=True)
             item = _text(row, "", -.472, z, .041, PAPER, self.sans, mutable=True)
             price = _text(row, "", .540, z, .036, MINT, self.mono, align=TextNode.A_right, mutable=True)
             self.shop_fields.append((row, key, item, price))
-        _text(self.shop, "1-5  BUY", -.562, .277, .031, PALE, self.mono)
-        _text(self.shop, "E  CLOSE", .562, .277, .031, ORANGE, self.mono, align=TextNode.A_right)
+        _text(self.shop, "1-7  BUY", -.562, .277, .031, PALE, self.mono)
+        self.shop_exit = _text(self.shop, "E  CLOSE", .562, .277, .031, ORANGE, self.mono,
+                               align=TextNode.A_right, mutable=True)
 
     def set_state(self, state):
         if state not in {"menu", "playing", "paused"}:
             raise ValueError(f"Unknown overlay state {state!r}")
         self.state = state
         self.help_visible = False
+        self.panel = None
+        self.set_rebinding()
         self._sync_visibility()
 
     def _sync_visibility(self):
-        playing = self.state == "playing" and not self.wasted_open
-        self.menu.show() if self.state == "menu" else self.menu.hide()
-        self.paused.show() if self.state == "paused" else self.paused.hide()
-        self.help.show() if self.help_visible and not self.wasted_open else self.help.hide()
+        outcome = self.wasted_open or self.busted_open
+        playing = self.state == "playing" and not outcome
+        self.menu.show() if self.state == "menu" and not self.panel else self.menu.hide()
+        self.paused.show() if self.state == "paused" and not self.panel else self.paused.hide()
+        self.help.show() if self.help_visible and not outcome and not self.panel else self.help.hide()
+        self.settings.show() if self.panel == "settings" else self.settings.hide()
+        self.saves.show() if self.panel == "saves" else self.saves.hide()
         self.debug.show() if playing and self.debug_visible else self.debug.hide()
         for group in self.hud:
             group.show() if playing else group.hide()
@@ -421,7 +665,7 @@ class Overlay:
         self._sync_combat_visibility()
 
     def _sync_combat_visibility(self):
-        playing = self.state == "playing" and not self.wasted_open
+        playing = self.state == "playing" and not (self.wasted_open or self.busted_open)
         engaging = playing and not self.dialogue_open and not self.help_visible and not self.driving
         conversation = playing and not self.help_visible and self.dialogue_open
         self.combat_hud.show() if engaging and self.armed else self.combat_hud.hide()
@@ -430,6 +674,7 @@ class Overlay:
         self.dialogue.show() if conversation and not self.shop_open else self.dialogue.hide()
         self.shop.show() if conversation and self.shop_open else self.shop.hide()
         self.wasted.show() if self.state == "playing" and self.wasted_open else self.wasted.hide()
+        self.busted.show() if self.state == "playing" and self.busted_open else self.busted.hide()
 
     def toggle_help(self):
         self.help_visible = not self.help_visible
@@ -478,6 +723,7 @@ class Overlay:
         _set_text(self.wasted_countdown, f"Hospital respawn in {max(0, math.ceil(seconds))} s")
         if not self.wasted_open:
             self.wasted_open = True
+            self.busted_open = False
             self.help_visible = False
             self.hit_time = 0.0
             self.hide_dialogue()
@@ -488,7 +734,47 @@ class Overlay:
             self.wasted_open = False
             self._sync_visibility()
 
-    def _update_minimap(self, position, heading, waypoint):
+    def show_busted(self, seconds):
+        _set_text(self.busted_countdown, f"Release in {max(0, math.ceil(seconds))} s")
+        if not self.busted_open:
+            self.busted_open = True
+            self.wasted_open = False
+            self.help_visible = False
+            self.hit_time = 0.0
+            self.hide_dialogue()
+            self._sync_visibility()
+
+    def hide_busted(self):
+        if self.busted_open:
+            self.busted_open = False
+            self._sync_visibility()
+
+    def _update_route(self, left, bottom, gps_route):
+        points = tuple((float(point[0]), float(point[1])) for point in gps_route)
+        old_left, old_bottom = self.route_corner
+        if points == self.route_points and max(abs(left - old_left), abs(bottom - old_bottom)) < .0015:
+            return
+        self.route_points = points
+        self.route_corner = left, bottom
+        self.route_layer.node().remove_all_geoms()
+        if len(points) < 2:
+            return
+        extent = NORTH * 2
+        scale = MAP_SIZE / self.map_zoom
+        projected = [(((x + NORTH) / extent - left) * scale, ((y + NORTH) / extent - bottom) * scale)
+                     for x, y in points]
+        line = LineSegs("gps route")
+        line.set_thickness(2.5)
+        line.set_color(*MINT)
+        for start, end in zip(projected, projected[1:]):
+            clip = _clip_minimap_segment(*start, *end)
+            if clip:
+                x0, z0, x1, z1 = clip
+                line.move_to(x0, 0, z0)
+                line.draw_to(x1, 0, z1)
+        line.create(self.route_layer.node())
+
+    def _update_minimap(self, position, heading, waypoint, gps_route=()):
         extent = NORTH * 2
         u = (float(position[0]) + NORTH) / extent
         v = (float(position[1]) + NORTH) / extent
@@ -496,6 +782,7 @@ class Overlay:
         left = min(1 - self.map_zoom, max(0, u - half_map))
         bottom = min(1 - self.map_zoom, max(0, v - half_map))
         self.map_image.set_tex_offset(self.map_stage, left, bottom)
+        self._update_route(left, bottom, () if gps_route is None else gps_route)
         margin = .018
         self.map_arrow.set_pos(
             min(MAP_SIZE - margin, max(margin, (u - left) * MAP_SIZE / self.map_zoom)), 0,
@@ -516,7 +803,8 @@ class Overlay:
     def update(self, dt, *, district="", position=(0, 0, 0), heading=0, speed=0,
                rpm=0, gear="", health=100, money=0, hour=17, context="", fps=0,
                debug_info="", driving=False, car_health=100, armor=0, weapon="",
-               ammo=None, reserve=None, reloading=False, aiming=False, objective="", waypoint=None):
+               ammo=None, reserve=None, reloading=False, aiming=False, objective="", waypoint=None,
+               wanted=0, wanted_status="", gps_route=()):
         if self.state != "playing":
             return
         _set_text(self.district, district or "Harbor City")
@@ -527,12 +815,19 @@ class Overlay:
         self.health_bar.set_sx(max(.001, min(1, health / 100)))
         _set_text(self.armor_text, f"{max(0, min(100, armor)):0.0f}")
         self.armor_bar.set_sx(max(.001, min(1, armor / 100)))
-        self._update_minimap(position, heading, waypoint)
+        self._update_minimap(position, heading, waypoint, gps_route)
         _set_text(self.objective, objective)
         self.objective_group.show() if objective else self.objective_group.hide()
+        if wanted > 0:
+            for index, star in enumerate(self.wanted_stars):
+                star.set_color(*(ORANGE if index < wanted else (.33, .35, .34, 1)))
+            _set_text(self.wanted_message, wanted_status)
+            self.wanted_group.show()
+        else:
+            self.wanted_group.hide()
 
         self.driving = driving
-        if driving and not self.wasted_open:
+        if driving and not (self.wasted_open or self.busted_open):
             self.hud_bottom_right.show()
             _set_text(self.speed, f"{min(999, abs(speed)):03.0f}")
             _set_text(self.gear, "R" if gear == -1 else str(gear))
@@ -549,11 +844,11 @@ class Overlay:
             ammunition = "" if ammo is None else str(ammo) if reserve is None else f"{ammo} / {reserve}"
             _set_text(self.ammo_text, ammunition)
             if ammo is None:
-                status = "LMB  ATTACK"
+                status = f"{self.fire_key}  ATTACK"
             elif reloading:
                 status = "RELOADING"
             elif ammo == 0:
-                status = "R  RELOAD" if reserve else "OUT OF AMMO"
+                status = f"{self.reload_key}  RELOAD" if reserve else "OUT OF AMMO"
             else:
                 status = ""
             _set_text(self.ammo_status, status)

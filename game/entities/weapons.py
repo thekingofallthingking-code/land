@@ -37,6 +37,7 @@ class WeaponSpec:
     pellets: int = 1
     automatic: bool = False
     starting: bool = False
+    projectile: bool = False
 
 
 _SPECS = tuple(WeaponSpec(**spec) for spec in json.loads(
@@ -85,7 +86,7 @@ class _CombatAudio:
         self._indices = {}
         self._volume = {
             "pistol": .56, "smg": .47, "shotgun": .73, "rifle": .58,
-            "melee": .51, "dry": .36, "reload": .36,
+            "melee": .51, "dry": .36, "reload": .36, "grenade": .37, "rocket": .63,
         }
         if loader is None:
             return
@@ -327,6 +328,13 @@ class WeaponSystem:
             convergence = Vec3(focus - start)
             if convergence.dot(direction) > .12:
                 direction = convergence.normalized()
+        if spec.projectile:
+            self.events.publish("projectile_launch", position=start, direction=direction, weapon=spec.id, owner=owner)
+            self._audio.play(spec.id, start)
+            if spec.id == "rocket":
+                self.events.publish("gunshot", position=start, direction=direction, weapon=spec.id, owner=owner)
+                self.effects.flash(start, direction, scale=1.5)
+            return ShotResult(spec.recoil_degrees, False, False, None)
         self.events.publish("gunshot", position=start, direction=direction, weapon=spec.id, owner=owner)
         self._audio.play(spec.id, start, pitch=self._pitch.uniform(.96, 1.04))
         self.effects.flash(start, direction, scale=1.42 if spec.id == "shotgun" else 1)
@@ -382,11 +390,18 @@ _MODEL_LAYOUT = {
     "smg": (.17, .47, .16, .22, (.30, .56, .48)),
     "shotgun": (.16, .77, .14, .33, (.61, .34, .18)),
     "rifle": (.15, .69, .15, .32, (.52, .48, .33)),
+    "rocket": (.23, .89, .23, .41, (.29, .43, .37)),
 }
 
 
 def build_weapon_model(parent, weapon_id):
     root = parent.attach_new_node(f"held {weapon_id}")
+    if weapon_id == "grenade":
+        mesh = Mesh("throwable model")
+        mesh.cone(0, .065, -.035, .12, .066, .052, (.30, .48, .34), 8)
+        mesh.box((0, .065, .086), (.044, .059, .035), (.65, .66, .48), bottom=True)
+        mesh.node().reparent_to(root)
+        return root
     dimensions = _MODEL_LAYOUT.get(weapon_id)
     if dimensions is None:
         return root
@@ -409,6 +424,8 @@ def build_weapon_model(parent, weapon_id):
 
 def weapon_muzzle(weapon_id) -> Point3:
     """Position of the muzzle in the held model's local coordinates."""
+    if weapon_id == "grenade":
+        return Point3(0, .13, .04)
     dimensions = _MODEL_LAYOUT.get(weapon_id)
     if dimensions is None:
         return Point3()

@@ -29,6 +29,18 @@
       "id": "melee", "slot": 5, "name": "Unarmed", "starting": true,
       "damage": 18, "range_meters": 1.6, "rounds_per_second": 1.7,
       "recoil_degrees": 0.85
+    },
+    {
+      "id": "grenade", "slot": 6, "name": "Harbor Grenade", "projectile": true,
+      "damage": 0, "capacity": 2, "starter_reserve": 4, "reserve_limit": 30,
+      "rounds_per_second": 1.5, "reload_seconds": 1.05, "range_meters": 42,
+      "recoil_degrees": 0.5
+    },
+    {
+      "id": "rocket", "slot": 7, "name": "Breakwater Launcher", "projectile": true,
+      "damage": 0, "capacity": 1, "starter_reserve": 4, "reserve_limit": 15,
+      "rounds_per_second": 0.8, "reload_seconds": 1.9, "range_meters": 150,
+      "recoil_degrees": 5.1
     }
   ]
 }

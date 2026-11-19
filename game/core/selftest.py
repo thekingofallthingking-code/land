@@ -9,6 +9,7 @@ from panda3d.core import BitMask32, Vec3
 from game.app import STEP, Controls
 from game.core.config import LOGS, Settings, read_json, write_json
 from game.core.section2_replay import run_city_replay
+from game.core.section3_replay import run_section3_replay
 
 
 def step(app, seconds, **controls):
@@ -18,8 +19,8 @@ def step(app, seconds, **controls):
 
 def assert_finite(app):
     vectors = [app.player.position, app.camera.get_pos(), app.camera.get_hpr()]
-    vectors.extend(person.position for person in app.peds.people)
-    for vehicle in (*app.vehicles, *app.traffic.vehicles):
+    vectors.extend(person.position for person in app.people())
+    for vehicle in app.all_vehicles():
         vectors.extend((vehicle.position, vehicle.node.get_hpr(), vehicle.body.get_linear_velocity()))
         assert math.isfinite(vehicle.rpm) and math.isfinite(vehicle.speed_kph), "Nonfinite vehicle telemetry"
         assert 0 <= vehicle.health <= 100, "Vehicle health outside its range"
@@ -144,6 +145,7 @@ def run_self_test(app, duration):
     assert app.lighting.night < .05, "Day cycle failed"
 
     run_city_replay(app)
+    run_section3_replay(app)
 
     samples = []
     max_chunks = len(app.city.loaded_chunks)
@@ -164,6 +166,9 @@ def run_self_test(app, duration):
         app.performance.record(frame_time)
         max_chunks = max(max_chunks, len(app.city.loaded_chunks))
         assert_finite(app)
+        assert len(app.police.vehicles) + len(app.foot_police.officers) <= app.police_cap
+        assert len(app.traffic.vehicles) <= app.traffic.cap
+        assert len(app.peds.people) <= app.peds.limit
         tick_count += 1
         time.sleep(max(0., tick_start + STEP - time.perf_counter()))
     assert tick_count > duration * 7, "Simulation throughput fell below 7 updates per second"
@@ -172,7 +177,8 @@ def run_self_test(app, duration):
           f"{tick_count / duration_run:.1f} scripted ticks/s | "
           f"{1 / statistics.mean(samples):.1f} uncapped updates/s | "
           f"{max_chunks} peak chunks | {len(app.vehicles)} parked/owned | {len(app.traffic.vehicles)} traffic | "
-          f"{len(app.peds.people)} pedestrians | 1 player", flush=True)
+          f"{len(app.peds.people)} pedestrians | {len(app.police.vehicles) + len(app.foot_police.officers)} police | "
+          f"{app.explosions.blast_count} blasts | 1 player", flush=True)
     if app.options.screenshot:
         from game.core.config import SCREENSHOTS
         from game.core.config import project_file

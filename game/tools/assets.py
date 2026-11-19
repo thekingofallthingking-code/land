@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ASSET_DIR = PROJECT_ROOT / "assets_generated"
 SAMPLE_RATE = 44_100
-AUDIO_VERSION = b"4\n"
+AUDIO_VERSION = b"6\n"
 Audio = NDArray[np.float64]
 
 
@@ -155,6 +155,40 @@ def _horn(frames: int) -> Audio:
     return np.tanh(tone * .68) * envelope
 
 
+def _siren(frames: int) -> Audio:
+    t = _time(frames)
+    cycle = tau * np.arange(frames) / frames
+    first = tau * 625 * t + 475 * (1 - np.cos(cycle))
+    second = tau * 937.5 * t - 380 * (1 - np.cos(cycle))
+    blend = .57 + .31 * np.sin(cycle)
+    tone = blend * (np.sin(first) + .19 * np.sin(2 * first))
+    tone += (1 - blend) * (np.sin(second) + .12 * np.sin(2 * second))
+    opening = tone[:round(.06 * SAMPLE_RATE)]
+    seam = 1 + int(np.argmin(np.abs(np.diff(opening))))
+    return np.roll(np.tanh(tone * .85), -seam)
+
+
+def _blast(frames: int) -> Audio:
+    t = _time(frames)
+    rng = np.random.default_rng(7725)
+    thump = np.sin(tau * (37 * t + 53 * (1 - np.exp(-10 * t)) / 10))
+    rumble = _band_noise(rng, frames, 28, 240)
+    crack = _band_noise(rng, frames, 210, 4100) * np.exp(-28 * t)
+    swell = (1 - np.exp(-740 * t)) * np.exp(-5.6 * t)
+    main = swell * (.89 * thump + .59 * rumble + .92 * crack)
+    tail = .27 * rumble * (1 - np.exp(-20 * t)) * np.exp(-2.9 * t)
+    return np.tanh((main + tail) * 1.22) * np.clip((t[-1] - t) / .076, 0, 1)
+
+
+def _rocket_launch(frames: int) -> Audio:
+    t = _time(frames)
+    rng = np.random.default_rng(1411)
+    jet = _band_noise(rng, frames, 245, 4200)
+    glide = np.sin(tau * (73 * t + 185 * t**2))
+    envelope = (1 - np.exp(-610 * t)) * np.exp(-11 * t)
+    return np.tanh((.57 * jet + .68 * glide) * envelope) * np.clip((t[-1] - t) / .028, 0, 1)
+
+
 def _arcade_report(frames: int, *, seed: int, tone: float, decay: float, weight: float) -> Audio:
     t = _time(frames)
     rng = np.random.default_rng(seed)
@@ -196,6 +230,10 @@ _AUDIO = {
     "harbor.wav": (_harbor, 12 * SAMPLE_RATE, 2, 0.38),
     "crowd.wav": (_crowd, 16 * SAMPLE_RATE, 2, .40),
     "horn.wav": (_horn, round(.48 * SAMPLE_RATE), 1, .74),
+    "siren.wav": (_siren, round(2.4 * SAMPLE_RATE), 1, .61),
+    "blast.wav": (_blast, round(1.6 * SAMPLE_RATE), 1, .94),
+    "weapon-rocket.wav": (_rocket_launch, round(.37 * SAMPLE_RATE), 1, .85),
+    "weapon-grenade.wav": (_swing, round(.17 * SAMPLE_RATE), 1, .45),
     "weapon-pistol.wav": (partial(_arcade_report, seed=633, tone=103, decay=20, weight=.80),
                           round(.33 * SAMPLE_RATE), 1, .90),
     "weapon-smg.wav": (partial(_arcade_report, seed=143, tone=145, decay=32, weight=.64),

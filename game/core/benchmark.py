@@ -3,6 +3,7 @@ import logging
 import time
 
 from game.app import Controls
+from game.core.section3_replay import blast_ahead, stage_chaos_benchmark
 
 FRAME_STEP = 1 / 30
 WARMUP_FRAMES = 12
@@ -15,18 +16,25 @@ def _drive_frame(app):
 
 
 def run_benchmark(app, frames, duration):
-    app.begin_play()
-    app.interact_vehicle()
+    chaos = app.options.scenario == "chaos"
+    if chaos:
+        stage_chaos_benchmark(app)
+    else:
+        app.begin_play()
+        app.interact_vehicle()
     if app.occupied is None:
         raise RuntimeError("Benchmark could not enter the starting car.")
 
-    # Place the same compact in the travel lane, clear of the parked fleet.
-    app.occupied.node.set_x(3.2)
-    app.occupied.node.set_y(32.0)
+    if not chaos:
+        # Place the same compact in the travel lane, clear of the parked fleet.
+        app.occupied.node.set_x(3.2)
+        app.occupied.node.set_y(32.0)
     app.follow_camera.update(0, app.player, app.occupied, snap=True)
     start = time.perf_counter()
     for _ in range(WARMUP_FRAMES):
         _drive_frame(app)
+    if chaos:
+        blast_ahead(app)
 
     for _ in range(frames):
         before = time.perf_counter()
@@ -40,12 +48,12 @@ def run_benchmark(app, frames, duration):
 
     renderer = app.win.get_gsg().get_driver_renderer()
     logging.info(
-        "DRIVE BENCHMARK | %s | %d×%d | %s | %d/%d frames in %.2fs | "
-        "%.1f average FPS | %.1fms median | %.1fms p95 | %.1fms p99 | %.0f km/h | %d chunks",
-        app.quality, app.win.get_x_size(), app.win.get_y_size(), renderer,
+        "%s BENCHMARK | %s | %d×%d | %s | %d/%d frames in %.2fs | "
+        "%.1f average FPS | %.1f minimum FPS | %.1fms median | %.1fms p95 | %.1fms p99 | %.0f km/h | %s",
+        app.options.scenario.upper(), app.quality, app.win.get_x_size(), app.win.get_y_size(), renderer,
         results["count"], frames, results["timed_seconds"], results["fps"],
-        results["median_ms"], results["p95_ms"], results["p99_ms"],
-        app.occupied.speed_kph, len(app.city.loaded_chunks),
+        results["min_fps"], results["median_ms"], results["p95_ms"], results["p99_ms"],
+        app.occupied.speed_kph if app.occupied else 0, app.entity_counts(),
     )
     if results["count"] < frames:
         raise RuntimeError("Benchmark reached its time limit. Retry with fewer --frames.")

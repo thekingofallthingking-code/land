@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "blasts": {
+    "grenade": {"radius": 8.5, "damage": 144, "vehicle_damage": 108, "push": 12, "shake": 4.8, "size": 2.6},
+    "rocket": {"radius": 12.5, "damage": 168, "vehicle_damage": 178, "push": 15, "shake": 6.8, "size": 4.5},
+    "vehicle": {"radius": 10.5, "damage": 124, "vehicle_damage": 141, "push": 11, "shake": 5.5, "size": 3.6},
+    "barrel": {"radius": 9.0, "damage": 115, "vehicle_damage": 100, "push": 10, "shake": 4.5, "size": 2.8},
+    "fuel": {"radius": 15.5, "damage": 160, "vehicle_damage": 155, "push": 16, "shake": 7.3, "size": 5.0}
+  },
+  "projectiles": {
+    "grenade": {"speed": 15.0, "loft": 4.4, "gravity": 13.5, "life": 2.0, "bounce": 0.45},
+    "rocket": {"speed": 57.0, "loft": 0, "gravity": 0, "life": 2.5, "bounce": 0}
+  },
+  "vehicle": {"smoke_health": 42, "fire_health": 18, "burn_per_second": 14, "wreck_seconds": 12},
+  "props": [
+    {"id": "exchange-fuel", "kind": "fuel", "position": [49, 45, 0.19], "health": 90},
+    {"id": "exchange-barrel-1", "kind": "barrel", "position": [40, 46.5, 0.19], "health": 42},
+    {"id": "exchange-barrel-2", "kind": "barrel", "position": [34, 44, 0.19], "health": 27},
+    {"id": "exchange-barrel-3", "kind": "barrel", "position": [30, 42, 0.19], "health": 31},
+    {"id": "westbank-fuel", "kind": "fuel", "position": [474, -125, 0.19], "health": 90},
+    {"id": "westbank-barrel", "kind": "barrel", "position": [468, -128, 0.19], "health": 36},
+    {"id": "docks-fuel", "kind": "fuel", "position": [605, 167, 0.19], "health": 90},
+    {"id": "docks-barrel-1", "kind": "barrel", "position": [613, 171, 0.19], "health": 36},
+    {"id": "docks-barrel-2", "kind": "barrel", "position": [619, 173, 0.19], "health": 36},
+    {"id": "docks-barrel-3", "kind": "barrel", "position": [623, 173, 0.19], "health": 42}
+  ],
+  "limits": {
+    "Low": {"fire": 18, "smoke": 21, "debris": 18, "rings": 5, "scorch": 10, "projectiles": 6, "blasts_per_tick": 4},
+    "Medium": {"fire": 28, "smoke": 38, "debris": 36, "rings": 8, "scorch": 18, "projectiles": 8, "blasts_per_tick": 6},
+    "High": {"fire": 40, "smoke": 58, "debris": 56, "rings": 12, "scorch": 26, "projectiles": 10, "blasts_per_tick": 8}
+  }
+}

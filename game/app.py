@@ -12,20 +12,25 @@ from panda3d.core import (
     BitMask32, ClockObject, Filename, ModifierButtons, Vec3, WindowProperties,
 )
 
+from game.ai.explosions import ExplosionSystem
+from game.ai.foot_police import FootOfficer, FootPolice
 from game.ai.pedestrians import Pedestrian, PedestrianManager
+from game.ai.police import PoliceFleet
 from game.ai.traffic import Traffic
-from game.ai.witnesses import witnesses_for
+from game.ai.witnesses import clear_sight, witnesses_for
 from game.core.camera import ThirdPersonCamera
-from game.core.config import ASSETS, PRESETS, ROOT, Settings, memory_gib, pick_quality, project_file, read_json, write_json
+from game.core.config import ACTION_LABELS, ASSETS, PRESETS, ROOT, Settings, memory_gib, pick_quality, project_file, read_json, rebind
 from game.core.events import EventBus
 from game.core.lighting import CityLighting
 from game.core.performance import PerformanceLog
 from game.core.pickups import Pickups
 from game.core.rules import apply_damage
+from game.core.savegame import SLOT_COUNT, slot_caption, slot_path, store_save
 from game.core.wanted import OFFENSES, Wanted
 from game.entities.player import Player
 from game.entities.vehicles import Vehicle
 from game.entities.weapons import HitTarget, WEAPON_SPECS, WeaponSystem, build_weapon_model, weapon_muzzle
+from game.missions.activities import Activities
 from game.missions.delivery import DeliveryJob
 from game.tools.assets import ensure_assets
 from game.ui.overlay import Overlay
@@ -35,6 +40,7 @@ STEP = 1 / 60
 SETTINGS_FILE = ROOT / "settings.json"
 SAVE_FILE = ROOT / "save.json"
 MAX_STOLEN_CARS = 12
+SLOTS = tuple(range(1, 8))
 
 
 @dataclass
@@ -59,6 +65,21 @@ class Carjacking:
     remaining: float = .72
 
 
+class ActorTargets:
+    def __init__(self, *managers):
+        self.managers = managers
+
+    def _nearest(self, method, origin, direction, distance):
+        hits = (getattr(manager, method)(origin, direction, distance) for manager in self.managers)
+        return min((hit for hit in hits if hit is not None), key=lambda hit: hit.distance, default=None)
+
+    def raycast(self, origin, direction, distance):
+        return self._nearest("raycast", origin, direction, distance)
+
+    def melee_target(self, origin, direction, distance):
+        return self._nearest("melee_target", origin, direction, distance)
+
+
 class HarborCity(ShowBase):
     def __init__(self, options):
         self.options = options
@@ -74,6 +95,10 @@ class HarborCity(ShowBase):
         self.conversation = None
         self.theft = None
         self.respawn_remaining = 0.0
+        self.busted = False
+        self.next_sighting = 0.0
+        self.binding_action = None
+        self.bound_controls = set()
         self.last_frame_time = None
         self.pointer_centered = False
         self.keys: set[str] = set()
@@ -143,10 +168,19 @@ class HarborCity(ShowBase):
         self.peds = PedestrianManager(self.render, self.physics, self.city, self.events, limit=pedestrian_limit)
         self.traffic = Traffic(self.render, self.physics, self.city, self.events,
                                audio_loader=self.vehicle_audio, cap=traffic_limit)
+        police_cap = {"Low": 6, "Medium": 9, "High": 12}[quality]
+        self.police = PoliceFleet(self.render, self.physics, self.city, self.events,
+                                  audio_loader=self.vehicle_audio, cap=police_cap)
+        self.foot_police = FootPolice(self.render, self.physics, self.city, self.events, cap=police_cap - 4)
+        self.actor_targets = ActorTargets(self.peds, self.foot_police)
+        self.police_cap = police_cap
         self.weapons = WeaponSystem(self.render, self.physics, self.events, audio_loader=self.vehicle_audio)
+        self.explosions = ExplosionSystem(self.render, self.physics, self.city, self.events,
+                                          quality=quality, audio_loader=self.vehicle_audio, camera=self.camera)
         self.wanted = Wanted()
         self.pickups = Pickups(self.render, self.events)
         self.delivery = DeliveryJob(self.render, self.city, self.events)
+        self.activities = Activities(self.render, self.city, self.events, self.peds, self.player)
         self.store = read_json(ROOT / "game/data/shop.json")
         self.held_model = None
         self.refresh_held_model()
@@ -161,12 +195,19 @@ class HarborCity(ShowBase):
         self.events.subscribe("pedestrian_death", self.on_pedestrian_death)
         self.events.subscribe("hit_and_run", self.on_hit_and_run)
         self.events.subscribe("explosion", self.on_explosion_crime)
+        self.events.subscribe("police_arrest", self.on_arrest)
+        self.events.subscribe("mission_failed", self.on_mission_failed)
+        self.performance.count_entities = self.entity_counts
         self.overlay = None
         if not self.headless:
             minimap = project_file(ASSETS / "minimap.png")
             if not minimap.is_file():
                 self.city.minimap(minimap)
-            self.overlay = Overlay(self, self.begin_play, self.resume, self.userExit, minimap)
+            self.overlay = Overlay(self, self.begin_play, self.resume, self.userExit, minimap,
+                                   on_quality=self.choose_quality, on_rebind=self.start_rebinding,
+                                   on_save=self.save_slot, on_load=self.load_slot)
+            self.refresh_settings()
+            self.refresh_slots()
         self.set_state("menu")
         self.follow_camera.update(0, self.player, snap=True)
         self.lighting.update(0, self.player.position, self.camera.get_pos())
@@ -180,16 +221,64 @@ class HarborCity(ShowBase):
             self.begin_play()
 
     def bind_inputs(self):
-        self.buttonThrowers[0].node().set_modifier_buttons(ModifierButtons())
-        for key in ("w", "a", "s", "d", "shift", "space", "f", "c", "e",
-                    "mouse1", "mouse3", "r", "1", "2", "3", "4", "5"):
-            self.accept(key, self.press, [key])
-            self.accept(key + "-up", self.keys.discard, [key])
+        thrower = self.buttonThrowers[0].node()
+        thrower.set_modifier_buttons(ModifierButtons())
+        thrower.set_button_down_event("harbor-raw-key")
+        self.accept("harbor-raw-key", self.receive_rebinding)
+        self.bind_control_keys()
         self.accept("escape", self.escape)
         self.accept("f1", self.overlay.toggle_help)
         self.accept("f3", self.overlay.toggle_debug)
         self.accept("f5", self.quicksave)
         self.accept("enter", self.resume_or_start)
+
+    def bind_control_keys(self):
+        for key in self.bound_controls:
+            self.ignore(key)
+            self.ignore(key + "-up")
+        self.bound_controls = set(self.settings.bindings.values()) | {str(slot) for slot in SLOTS}
+        self.keys.clear()
+        self.pressed.clear()
+        for key in self.bound_controls:
+            self.accept(key, self.press, [key])
+            self.accept(key + "-up", self.keys.discard, [key])
+
+    def refresh_settings(self, message=""):
+        if self.overlay:
+            self.overlay.set_settings(self.settings.quality or self.quality, self.settings.bindings, ACTION_LABELS,
+                                      message=message)
+
+    def choose_quality(self, quality):
+        if quality in PRESETS:
+            self.settings.quality = quality
+            self.save_settings("Restart to apply graphics quality.")
+
+    def save_settings(self, message):
+        try:
+            self.settings.save(self.settings_path)
+        except (OSError, ValueError):
+            logging.exception("Could not save settings")
+            message = "Settings could not be written."
+        self.refresh_settings(message)
+
+    def start_rebinding(self, action):
+        if action in self.settings.bindings:
+            self.binding_action = action
+            self.overlay.set_rebinding(action)
+
+    def receive_rebinding(self, button):
+        if self.binding_action is None:
+            return
+        key = button.get_name() if hasattr(button, "get_name") else str(button)
+        if key == "escape":
+            return
+        if rebind(self.settings.bindings, self.binding_action, key):
+            self.binding_action = None
+            self.bind_control_keys()
+            self.save_settings("Key bindings saved.")
+            self.overlay.set_rebinding()
+        else:
+            self.overlay.set_rebinding(self.binding_action, "That key is reserved.")
 
     def windowEvent(self, window):
         super().windowEvent(window)
@@ -233,12 +322,20 @@ class HarborCity(ShowBase):
             self.set_state("playing")
 
     def resume_or_start(self):
+        if self.overlay and self.overlay.panel:
+            return
         if self.game_state == "menu":
             self.begin_play()
         else:
             self.resume()
 
     def escape(self):
+        if self.binding_action is not None:
+            self.binding_action = None
+            self.overlay.set_rebinding()
+            return
+        if self.overlay and self.overlay.close_panel():
+            return
         if self.game_state == "playing":
             self.set_state("paused")
         elif self.game_state == "paused":
@@ -253,19 +350,20 @@ class HarborCity(ShowBase):
             self.pointer_centered = self.win.move_pointer(0, center_x, center_y)
         else:
             self.pointer_centered = False
+        keys = self.settings.bindings
         controls = Controls(
-            forward=float("w" in self.keys) - float("s" in self.keys),
-            side=float("d" in self.keys) - float("a" in self.keys),
-            sprint="shift" in self.keys,
-            jump="space" in (self.keys if self.occupied else self.pressed),
-            interact="f" in self.pressed,
-            camera="c" in self.pressed,
-            talk="e" in self.pressed,
-            aim="mouse3" in self.keys,
-            fire="mouse1" in self.keys,
-            fire_pressed="mouse1" in self.pressed,
-            reload="r" in self.pressed,
-            weapon_slot=next((slot for slot in range(1, 6) if str(slot) in self.pressed), 0),
+            forward=float(keys["forward"] in self.keys) - float(keys["back"] in self.keys),
+            side=float(keys["right"] in self.keys) - float(keys["left"] in self.keys),
+            sprint=keys["sprint"] in self.keys,
+            jump=keys["jump"] in (self.keys if self.occupied else self.pressed),
+            interact=keys["interact"] in self.pressed,
+            camera=keys["vehicle_view"] in self.pressed,
+            talk=keys["talk"] in self.pressed,
+            aim=keys["aim"] in self.keys,
+            fire=keys["fire"] in self.keys,
+            fire_pressed=keys["fire"] in self.pressed,
+            reload=keys["reload"] in self.pressed,
+            weapon_slot=next((slot for slot in SLOTS if str(slot) in self.pressed), 0),
         )
         self.pressed.clear()
         return controls
@@ -400,6 +498,9 @@ class HarborCity(ShowBase):
     def on_mission_completed(self, title, reward):
         self.show_notice(f"{title} complete  +${reward}")
 
+    def on_mission_failed(self, title, reason):
+        self.show_notice(f"{title}: {reason}")
+
     def on_crime(self, kind, position, offender=None, witnesses=None, victim=None, vehicle=None, **_):
         if offender is not self.player or kind not in OFFENSES:
             return
@@ -407,8 +508,9 @@ class HarborCity(ShowBase):
             exclusions = (self.player.controller,
                           vehicle.body if vehicle is not None else None,
                           self.occupied.body if self.occupied is not None else None)
-            witnesses = witnesses_for(self.physics, kind, position, self.peds.people,
-                                      self.traffic.vehicles, ignore=exclusions, victim=victim)
+            drivers = (*self.traffic.vehicles, *(car for car in self.police.vehicles if self.police.has_driver(car)))
+            witnesses = witnesses_for(self.physics, kind, position, self.people(),
+                                      drivers, ignore=exclusions, victim=victim)
         previous = self.wanted.stars
         if self.wanted.report(kind, position, witnesses, self.elapsed):
             self.events.publish("witnessed_crime", kind=kind, position=position, witnesses=tuple(witnesses),
@@ -428,8 +530,52 @@ class HarborCity(ShowBase):
         if vehicle is self.occupied:
             self.on_crime("hit_and_run", position, self.player, witnesses, victim=person, vehicle=vehicle)
 
-    def on_explosion_crime(self, position, owner=None, witnesses=None, **_):
+    def on_explosion_crime(self, position, owner=None, witnesses=None, radius=0, shake=0, **_):
+        distance = (Vec3(position) - self.focus()).length()
+        self.follow_camera.shake(shake * max(0.0, 1 - distance / max(6., radius * 2.4)))
         self.on_crime("explosion", position, owner, witnesses)
+
+    def people(self):
+        return (*self.peds.people, *self.foot_police.officers)
+
+    def all_vehicles(self):
+        return (*self.vehicles, *self.traffic.vehicles, *self.police.vehicles)
+
+    def entity_counts(self):
+        return {
+            "chunks": len(self.city.loaded_chunks),
+            "pedestrians": len(self.peds.people),
+            "traffic": len(self.traffic.vehicles),
+            "parked_owned": sum(car.physics_active for car in self.vehicles),
+            "police_cruisers": len(self.police.vehicles),
+            "police_officers": len(self.foot_police.officers),
+            "roadblocks": self.police.roadblock_count,
+            "wanted_stars": self.wanted.stars,
+            "explosion_props": len(self.explosions.props),
+            "projectiles": self.explosions.projectile_count,
+            "blast_particles": sum(len(pool.active) for pool in (
+                self.explosions.fx.fire, self.explosions.fx.smoke, self.explosions.fx.rings,
+            )),
+            "debris": len(self.explosions.fx.debris.active),
+            "blast_count": self.explosions.blast_count,
+        }
+
+    def update_wanted(self):
+        visible = None
+        if self.wanted.stars and self.elapsed >= self.next_sighting:
+            self.next_sighting = self.elapsed + .12
+            focus = self.focus()
+            target = focus + Vec3(0, 0, .85)
+            if self.foot_police.has_line_of_sight(focus):
+                visible = focus
+            else:
+                ignore = (self.player.controller, self.occupied.body if self.occupied else None)
+                for position, body in self.police.sighting_sources():
+                    if ((position - target).length_squared() < 79 ** 2
+                            and clear_sight(self.physics, position, target, (*ignore, body))):
+                        visible = focus
+                        break
+        self.wanted.update(self.elapsed, visible)
 
     def on_pedestrian_bump(self, message, position, **_):
         if (position - self.focus()).length_squared() < 8 ** 2:
@@ -440,7 +586,10 @@ class HarborCity(ShowBase):
 
     def on_weapon_hit(self, target, amount, position, direction=None, headshot=False, owner=None, weapon=None, **_):
         killed = False
-        if isinstance(target, Pedestrian) and target.alive:
+        if owner is self.player and (isinstance(target, FootOfficer)
+                                     or isinstance(target, Vehicle) and self.police.is_police(target)):
+            self.on_crime("attacking_police", position, owner, vehicle=target if isinstance(target, Vehicle) else None)
+        if isinstance(target, (Pedestrian, FootOfficer)) and target.alive:
             target.take_damage(amount, source=owner, direction=direction, headshot=headshot,
                                kind="melee" if weapon == "melee" else "gunshot")
             killed = not target.alive
@@ -452,26 +601,39 @@ class HarborCity(ShowBase):
             self.overlay.flash_hit(killed=killed)
 
     def on_damage(self, target, amount, source=None, kind=None, **_):
-        if isinstance(target, Vehicle) and kind == "npc_gunshot":
-            target.apply_damage(amount, source="npc_gunshot")
+        if isinstance(target, Vehicle) and kind in ("npc_gunshot", "police_gunshot"):
+            target.apply_damage(amount, source=kind)
         if target is not self.player or self.respawn_remaining:
             return
         self.player.health, self.player.armor = apply_damage(self.player.health, self.player.armor, amount)
         if self.player.health <= 0:
-            self.respawn_remaining = 3.0
-            death_position = Vec3(self.focus())
-            self.occupied = None
-            self.player.set_active(False)
-            self.player.teleport(death_position)
-            self.end_conversation()
-            self.aiming = False
-            self.fire_queued = False
-            self.events.publish("player_death", position=death_position, source=source)
+            self.begin_respawn(source=source)
+
+    def on_arrest(self, officer, position, **_):
+        if not self.respawn_remaining and self.wanted.stars:
+            self.player.money = max(0, self.player.money - 70)
+            self.begin_respawn(busted=True, source=officer)
+
+    def begin_respawn(self, *, busted=False, source=None):
+        self.busted = busted
+        self.respawn_remaining = 3.0
+        location = Vec3(self.focus())
+        self.occupied = None
+        self.player.health = 0
+        self.player.set_active(False)
+        self.player.teleport(location)
+        self.end_conversation()
+        self.aiming = False
+        self.fire_queued = False
+        self.wanted.clear()
+        self.activities.cancel("Busted" if busted else "Wasted")
+        self.events.publish("player_busted" if busted else "player_death", position=location, source=source)
 
     def respawn(self):
         self.respawn_remaining = 0
-        self.city.update(self.city.hospital, eager=True)
-        self.player.teleport(self.city.hospital, 90)
+        position = self.city.spawn if self.busted else self.city.hospital
+        self.city.update(position, eager=True)
+        self.player.teleport(position, 90)
         self.player.health = 100
         self.player.armor = 0
         self.player.set_active(True)
@@ -479,13 +641,19 @@ class HarborCity(ShowBase):
         self.follow_camera.update(0, self.player, snap=True)
         if self.overlay:
             self.overlay.hide_wasted()
-            self.overlay.notify(self.city.hospital_name)
+            self.overlay.hide_busted()
+            self.overlay.notify("Released on Breakwater Avenue" if self.busted else self.city.hospital_name)
+        self.busted = False
         self.events.publish("player_respawn", position=self.player.position)
 
     def toggle_conversation(self):
         if self.conversation:
             self.end_conversation()
         elif not self.occupied and not self.theft:
+            if (offer := self.activities.offered_at(self.player.position)) is not None:
+                if self.activities.accept(offer.id):
+                    self.show_notice(f"{offer.title} accepted")
+                    return
             if self.delivery.offered_at(self.player.position):
                 self.delivery.accept()
                 self.show_notice(f"{self.delivery.title} accepted")
@@ -510,17 +678,17 @@ class HarborCity(ShowBase):
         return self.conversation.is_shopkeeper and self.conversation.mood not in ("afraid", "angry")
 
     def shop_offer(self, slot):
-        offer = self.store["offers"][slot - 1]
+        offer = self.store["offers"][slot - 1 if slot < 5 else slot - 2]
         owned = self.weapons.owns(offer["weapon"])
         name = WEAPON_SPECS[offer["weapon"]].name
         label = f'{name}  +{offer["rounds"]} ammo' if owned else name
         return offer, owned, label, offer["ammo_price"] if owned else offer["price"]
 
     def shop_rows(self):
-        rows = [(str(slot), label, f"${price}") for slot, (_, _, label, price) in
-                enumerate((self.shop_offer(slot) for slot in range(1, 5)), 1)]
+        rows = [(str(slot), label, f"${price}") for slot in (1, 2, 3, 4, 6, 7)
+                for _, _, label, price in (self.shop_offer(slot),)]
         armor_price = self.store["armor_price"]
-        rows.append(("5", "Body armor", "Full" if self.player.armor >= 100 else f"${armor_price}"))
+        rows.insert(4, ("5", "Body armor", "Full" if self.player.armor >= 100 else f"${armor_price}"))
         return rows
 
     def buy_item(self, slot):
@@ -579,10 +747,10 @@ class HarborCity(ShowBase):
             muzzle = None
         else:
             muzzle = self.render.get_relative_point(self.held_model, weapon_muzzle(self.weapons.selected.id))
-        targets = tuple(HitTarget(vehicle, body=vehicle.body)
-                        for vehicle in (*self.vehicles, *self.traffic.vehicles) if vehicle.physics_active)
+        targets = tuple(HitTarget(vehicle, body=vehicle.body) for vehicle in self.all_vehicles()
+                        if vehicle.physics_active) + self.explosions.targets
         shot = self.weapons.fire(origin, direction, aimed=self.aiming, pressed=pressed,
-                                 targets=targets, people=self.peds, ignore=(self.player.controller,),
+                                 targets=targets, people=self.actor_targets, ignore=(self.player.controller,),
                                  owner=self.player, muzzle=muzzle)
         if shot is not None:
             self.player.attack_pose()
@@ -617,9 +785,13 @@ class HarborCity(ShowBase):
             if firing:
                 self.fire_weapon(self.fire_queued)
         if advance_clock:
-            walkers = (*self.peds.people, self.player) if self.player.active else self.peds.people
-            self.traffic.update(dt, self.focus(), walkers, obstacles=self.vehicles,
+            people = self.people()
+            walkers = (*people, self.player) if self.player.active else people
+            self.traffic.update(dt, self.focus(), walkers, obstacles=(*self.vehicles, *self.police.vehicles),
                                 night=self.lighting.night, elapsed=self.elapsed)
+            self.police.update(dt, self.elapsed, self.wanted, self.focus(), player_vehicle=self.occupied,
+                               obstacles=(*self.vehicles, *self.traffic.vehicles), pedestrians=walkers,
+                               foot_count=len(self.foot_police.officers), night=self.lighting.night)
         for vehicle in self.vehicles:
             occupied = vehicle is self.occupied
             vehicle.update(dt, controls.forward if occupied else 0,
@@ -629,16 +801,21 @@ class HarborCity(ShowBase):
         for vehicle in self.vehicles:
             vehicle.after_physics(dt)
         self.traffic.after_physics(dt)
+        self.police.after_physics(dt)
         self.player.animate(dt)
         if advance_clock:
             self.elapsed += dt
-            self.wanted.update(self.elapsed)
+            self.update_wanted()
             self.city.set_signal_time(self.elapsed)
             focus = self.focus()
             self.peds.update(dt, self.elapsed, focus, self.player,
-                             vehicles=(*self.vehicles, *self.traffic.vehicles), occupied=self.occupied)
+                             vehicles=self.all_vehicles(), occupied=self.occupied)
+            self.foot_police.update(dt, self.elapsed, self.player, self.occupied, self.wanted)
+            self.explosions.update(dt, focus, self.all_vehicles(), self.people(), self.player,
+                                   player_vehicle=self.occupied)
             self.pickups.update(dt, self.player, self.weapons, focus)
             self.delivery.update(self.player, self.occupied, self.vehicles)
+            self.activities.update(dt, self.occupied, self.wanted.stars)
             if self.respawn_remaining:
                 self.respawn_remaining -= dt
                 if self.respawn_remaining <= 0:
@@ -697,37 +874,48 @@ class HarborCity(ShowBase):
             speed, rpm, gear = (vehicle.speed_kph, vehicle.rpm, vehicle.gear) if vehicle else (0, 0, "")
             ammo, reserve = self.weapons.ammo if self.weapons.selected.id != "melee" else (None, None)
             fps = ClockObject.get_global_clock().get_average_frame_rate()
+            activities_objective = self.activities.objective(focus)
             self.overlay.update(
                 dt, district=self.city.district(focus.x, focus.y), position=focus,
                 heading=vehicle.heading if vehicle else self.follow_camera.heading,
                 speed=speed, rpm=rpm, gear=gear, health=self.player.health,
                 money=self.player.money, hour=self.lighting.hour, context=context,
                 fps=fps, debug_info=f"{self.quality}  |  {len(self.city.loaded_chunks)} chunks  |  "
-                f"{len(self.vehicles) + len(self.traffic.vehicles)} cars\n"
-                f"{len(self.peds.people)} pedestrians  |  X {focus.x:.0f}  Y {focus.y:.0f}",
+                f"{len(self.all_vehicles())} cars\n"
+                f"{len(self.peds.people)} pedestrians  |  {len(self.police.vehicles) + len(self.foot_police.officers)} police",
                 driving=vehicle is not None, car_health=vehicle.health if vehicle else 100,
                 armor=self.player.armor, weapon=self.weapons.selected.name, ammo=ammo, reserve=reserve,
                 reloading=self.weapons.reload_remaining > 0, aiming=self.aiming,
-                objective=self.delivery.objective(focus), waypoint=self.delivery.waypoint(),
+                objective=activities_objective or self.delivery.objective(focus),
+                waypoint=self.activities.waypoint(focus) or self.delivery.waypoint(),
+                gps_route=self.activities.route(focus),
+                wanted=self.wanted.stars,
+                wanted_status={"pursuit": "Pursuit", "search": "Searching", "cooldown": "Cooling down",
+                               "clear": ""}[self.wanted.mode],
             )
             if self.respawn_remaining:
-                self.overlay.show_wasted(self.respawn_remaining)
+                display = self.overlay.show_busted if self.busted else self.overlay.show_wasted
+                display(self.respawn_remaining)
 
     def context_prompt(self):
         if self.respawn_remaining or self.conversation:
             return ""
+        vehicle_key = self.settings.bindings["interact"].upper()
+        talk_key = self.settings.bindings["talk"].upper()
         if self.occupied:
-            return "F   Exit vehicle"
+            return f"{vehicle_key}   Exit vehicle"
         if self.theft:
             return "Taking the wheel"
+        if (offer := self.activities.offered_at(self.player.position)) is not None:
+            return f"{talk_key}   Start {offer.title}"
         if self.delivery.offered_at(self.player.position):
-            return f"E   Start {self.delivery.title}"
+            return f"{talk_key}   Start {self.delivery.title}"
         person = self.peds.nearby(self.player.position)
         if person is not None:
-            return "E   Shop" if person.is_shopkeeper else "E   Talk"
+            return f"{talk_key}   Shop" if person.is_shopkeeper else f"{talk_key}   Talk"
         vehicle = self.nearby_vehicle()
         if vehicle is not None:
-            return "F   Take the wheel" if self.traffic.has_driver(vehicle) else "F   Enter vehicle"
+            return f"{vehicle_key}   Take the wheel" if self.traffic.has_driver(vehicle) else f"{vehicle_key}   Enter vehicle"
         return ""
 
     def tick(self, task):
@@ -741,28 +929,53 @@ class HarborCity(ShowBase):
         return Task.cont
 
     def quicksave(self):
-        if self.game_state != "playing" or self.respawn_remaining:
+        if self.game_state != "playing" or self.respawn_remaining or (self.overlay and self.overlay.panel):
             return
+        self.save_game(self.save_path)
+
+    def refresh_slots(self, message=""):
+        if self.overlay:
+            self.overlay.set_slots({slot: slot_caption(slot) for slot in range(1, SLOT_COUNT + 1)}, message=message)
+
+    def save_slot(self, slot):
+        if self.game_state not in ("playing", "paused") or self.respawn_remaining:
+            self.refresh_slots("Start playing before saving.")
+            return
+        saved = self.save_game(slot_path(slot))
+        self.refresh_slots(f"Saved slot {slot}." if saved else "Save unavailable.")
+
+    def load_slot(self, slot):
+        if not self.load_save(slot_path(slot)):
+            self.refresh_slots("That slot is empty or unreadable.")
+            return
+        self.set_state("playing")
+        self.follow_camera.update(0, self.player, self.occupied, snap=True)
+        self.show_notice(f"Loaded slot {slot}")
+
+    def save_game(self, path):
         values = {
-            "schema": 2, "on_foot": list(self.player.position), "heading": self.follow_camera.heading,
+            "schema": 3, "on_foot": list(self.player.position), "heading": self.follow_camera.heading,
             "hour": self.lighting.hour, "health": self.player.health, "money": self.player.money,
             "armor": self.player.armor, "weapons": self.weapons.snapshot(),
             "mission": self.delivery.snapshot(self.vehicles),
             "wanted": self.wanted.snapshot(self.elapsed),
+            "activities": self.activities.snapshot(),
+            "explosions": self.explosions.snapshot(),
             "occupied": self.vehicles.index(self.occupied) if self.occupied else None,
             "vehicles": [{"kind": car.kind, "position": list(car.position),
                           "hpr": list(car.node.get_hpr()), "health": car.health}
                          for car in self.vehicles],
         }
         try:
-            write_json(self.save_path, values)
+            store_save(path, values)
         except (OSError, ValueError):
             logging.exception("Quicksave failed")
             if self.overlay:
                 self.overlay.notify("Save unavailable")
-            return
+            return False
         if self.overlay:
             self.overlay.notify("Drive saved")
+        return True
 
     @staticmethod
     def valid_vector(value):
@@ -770,11 +983,15 @@ class HarborCity(ShowBase):
             isinstance(item, (float, int)) and -100_000 <= item <= 100_000 for item in value
         )
 
-    def load_save(self):
-        data = read_json(self.save_path)
+    def load_save(self, path=None):
+        data = read_json(path or self.save_path)
         point = data.get("on_foot")
-        if data.get("schema") not in (1, 2) or not self.valid_vector(point) or not self.city.contains(*point[:2]):
-            return
+        if data.get("schema") not in (1, 2, 3) or not self.valid_vector(point) or not self.city.contains(*point[:2]):
+            return False
+        self.police.clear()
+        self.foot_police.clear()
+        self.respawn_remaining = 0.0
+        self.busted = False
         self.occupied = None
         self.player.set_active(True)
         self.player.teleport(Vec3(*point))
@@ -825,8 +1042,11 @@ class HarborCity(ShowBase):
             self.player.set_active(False)
         self.delivery.restore(data.get("mission"), cars)
         self.wanted.restore(data.get("wanted"), self.elapsed)
+        self.activities.restore(data.get("activities"), wanted_stars=self.wanted.stars)
+        self.explosions.restore(data.get("explosions"), self.vehicles)
         self.city.update(self.focus(), eager=True)
         self.sync_vehicles()
+        return True
 
     def snapshot(self, path: Path):
         if not self.win:
@@ -845,6 +1065,10 @@ class HarborCity(ShowBase):
         self.weapons.close()
         self.pickups.close()
         self.delivery.close()
+        self.activities.close()
+        self.explosions.close()
+        self.foot_police.close()
+        self.police.close()
         self.peds.close()
         self.traffic.close()
         for vehicle in self.vehicles:

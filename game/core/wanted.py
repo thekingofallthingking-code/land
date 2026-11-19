@@ -1,6 +1,4 @@
 """Witness-gated crime escalation and time-based police search state."""
-from math import isfinite
-
 from game.core.config import ROOT, read_json
 
 RULES = read_json(ROOT / "game/data/wanted.json")

@@ -1,5 +1,5 @@
 """Local paths, quality presets and validated versioned persistence."""
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 import logging
 import os
@@ -15,6 +15,30 @@ PRESETS = {
     "Medium": dict(shadow=1024, far=630, radius=2, msaa=0),
     "High": dict(shadow=2048, far=800, radius=3, msaa=2),
 }
+DEFAULT_BINDINGS = {
+    "forward": "w", "back": "s", "left": "a", "right": "d", "sprint": "shift",
+    "jump": "space", "interact": "f", "vehicle_view": "c", "talk": "e",
+    "aim": "mouse3", "fire": "mouse1", "reload": "r",
+}
+ACTION_LABELS = {
+    "forward": "Forward / accelerate", "back": "Back / brake",
+    "left": "Left", "right": "Right", "sprint": "Sprint", "jump": "Jump / handbrake",
+    "interact": "Vehicle entry / exit", "vehicle_view": "Vehicle view", "talk": "Interact",
+    "aim": "Aim", "fire": "Fire / melee", "reload": "Reload",
+}
+EXTRA_KEYS = frozenset(("space", "shift", "control", "alt", "tab", "mouse1", "mouse2",
+                        "mouse3", "arrow_up", "arrow_down", "arrow_left", "arrow_right"))
+
+
+def rebind(bindings, action, key):
+    if (action not in DEFAULT_BINDINGS or not isinstance(key, str)
+            or not (len(key) == 1 and "a" <= key <= "z" or key in EXTRA_KEYS)):
+        return False
+    other = next((name for name, binding in bindings.items() if binding == key), None)
+    if other and other != action:
+        bindings[other] = bindings[action]
+    bindings[action] = key
+    return True
 
 
 def project_file(path: Path) -> Path:
@@ -72,6 +96,7 @@ class Settings:
     quality: str = ""
     sensitivity: float = .22
     volume: float = .72
+    bindings: dict[str, str] = field(default_factory=DEFAULT_BINDINGS.copy)
 
     @classmethod
     def load(cls, path: Path):
@@ -84,6 +109,9 @@ class Settings:
             value = data.get(key)
             if isinstance(value, (float, int)) and lower <= value <= upper:
                 setattr(result, key, float(value))
+        if isinstance(data.get("bindings"), dict):
+            for action, key in data["bindings"].items():
+                rebind(result.bindings, action, key)
         return result
 
     def save(self, path: Path) -> None:

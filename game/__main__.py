@@ -16,6 +16,8 @@ def arguments():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--self-test", action="store_true", help="run the scripted integration test")
     mode.add_argument("--benchmark", action="store_true", help="benchmark a repeatable offscreen drive")
+    parser.add_argument("--scenario", choices=("drive", "chaos"), default="drive",
+                        help="benchmark normal driving or a three-star chase with a large blast")
     parser.add_argument("--offscreen", action="store_true", help="render without opening a window")
     parser.add_argument("--play", action="store_true", help="skip the title screen")
     parser.add_argument("--quality", choices=PRESETS, help="override the detected graphics preset")
@@ -27,6 +29,8 @@ def arguments():
     parser.add_argument("--screenshot", type=Path, help="PNG filename within screenshots/")
     options = parser.parse_args()
     options.offscreen |= options.benchmark
+    if options.scenario != "drive" and not options.benchmark:
+        parser.error("--scenario chaos requires --benchmark.")
     if not (5 <= options.duration <= 75 and 1 <= options.frames <= 1200):
         parser.error("Duration must be 5–75 seconds and frames must be 1–1200.")
     if not (640 <= options.width <= 3840 and 360 <= options.height <= 2160):

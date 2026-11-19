@@ -36,6 +36,8 @@ class ThirdPersonCamera:
         self._boom_fraction = 1.0
         self._aim = 0.0
         self._recoil = 0.0
+        self._shake = 0.0
+        self._shake_clock = 0.0
 
     def mouse(self, dx, dy):
         if self.hood_view and self._vehicle is not None:
@@ -57,6 +59,9 @@ class ThirdPersonCamera:
 
     def recoil(self, degrees):
         self._recoil = min(13.0, self._recoil + degrees)
+
+    def shake(self, magnitude):
+        self._shake = min(.28, self._shake + magnitude * .055)
 
     def _clip(self, origin, desired, right, ignore):
         ray = desired - origin
@@ -141,5 +146,10 @@ class ThirdPersonCamera:
             self._boom_fraction += (safe - self._boom_fraction) * _blend(dt, 7)
         position = pivot + (desired - pivot) * self._boom_fraction
         target = self._pivot + right * (shoulder * .92) - offset * .65
+        if self._shake > .001:
+            self._shake_clock += dt * 35
+            wave = right * math.sin(self._shake_clock) + _UP * math.cos(self._shake_clock * 1.27)
+            position += wave * (self._shake * self._boom_fraction)
+            self._shake *= math.exp(-5.5 * dt)
         self.node.set_pos(position)
         self.node.look_at(Point3(target), _UP)

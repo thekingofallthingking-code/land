@@ -10,6 +10,48 @@
       "reward": 240,
       "arrival_radius": 5.5,
       "maximum_finish_kph": 12
+    },
+    {
+      "id": "slipway_escape",
+      "kind": "getaway",
+      "title": "Slipway Escape",
+      "start": [11.1, 73, 0.19],
+      "destination": [294.35, -246, 0.0],
+      "destination_name": "Slipway Garage",
+      "reward": 460,
+      "arrival_radius": 7.0,
+      "maximum_finish_kph": 16,
+      "minimum_stars": 1,
+      "color": [0.33, 0.84, 0.79]
+    },
+    {
+      "id": "breakwater_bounty",
+      "kind": "target",
+      "title": "Breakwater Bounty",
+      "start": [11.1, 57, 0.19],
+      "destination": [155.1, -198, 0.19],
+      "destination_name": "Mara Voss",
+      "target_archetype": "gang",
+      "reward": 390,
+      "arrival_radius": 1.2,
+      "color": [0.98, 0.53, 0.35]
+    },
+    {
+      "id": "exchange_sprint",
+      "kind": "race",
+      "title": "Exchange Sprint",
+      "start": [11.1, -63, 0.19],
+      "checkpoints": [
+        [3.4, -27, 0.0],
+        [3.4, 111, 0.0],
+        [106, 140.6, 0.0],
+        [147.4, 193, 0.0],
+        [147.4, 247, 0.0]
+      ],
+      "reward": 340,
+      "arrival_radius": 8.0,
+      "time_limit": 75.0,
+      "color": [0.95, 0.75, 0.3]
     }
   ]
 }

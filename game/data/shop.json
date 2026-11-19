@@ -1,10 +1,42 @@
 {
   "schema": 1,
   "offers": [
-    {"weapon": "pistol", "price": 75, "rounds": 24, "ammo_price": 20},
-    {"weapon": "smg", "price": 135, "rounds": 56, "ammo_price": 38},
-    {"weapon": "shotgun", "price": 170, "rounds": 18, "ammo_price": 34},
-    {"weapon": "rifle", "price": 245, "rounds": 48, "ammo_price": 45}
+    {
+      "weapon": "pistol",
+      "price": 75,
+      "rounds": 24,
+      "ammo_price": 20
+    },
+    {
+      "weapon": "smg",
+      "price": 135,
+      "rounds": 56,
+      "ammo_price": 38
+    },
+    {
+      "weapon": "shotgun",
+      "price": 170,
+      "rounds": 18,
+      "ammo_price": 34
+    },
+    {
+      "weapon": "rifle",
+      "price": 245,
+      "rounds": 48,
+      "ammo_price": 45
+    },
+    {
+      "weapon": "grenade",
+      "price": 140,
+      "rounds": 3,
+      "ammo_price": 55
+    },
+    {
+      "weapon": "rocket",
+      "price": 330,
+      "rounds": 4,
+      "ammo_price": 85
+    }
   ],
   "armor_price": 55
 }

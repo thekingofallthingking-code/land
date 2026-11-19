@@ -22,12 +22,14 @@ class FrameTimings:
     def __init__(self):
         self.count = 0
         self.seconds = 0.0
+        self.longest = 0.0
         self.samples = []
         self.random = Random(0)
 
     def record(self, seconds):
         self.count += 1
         self.seconds += seconds
+        self.longest = max(self.longest, seconds)
         if len(self.samples) < SAMPLE_LIMIT:
             self.samples.append(seconds)
         else:
@@ -43,6 +45,7 @@ class FrameTimings:
             "timed_seconds": self.seconds,
             "percentile_samples": count,
             rate_name: self.count / self.seconds if self.seconds else None,
+            f"min_{rate_name}": 1 / self.longest if self.longest else None,
             "median_ms": median(values) * 1000 if count else None,
             "p95_ms": values[math.ceil(count * .95) - 1] * 1000 if count else None,
             "p99_ms": values[math.ceil(count * .99) - 1] * 1000 if count else None,
@@ -51,7 +54,7 @@ class FrameTimings:
 
 class PerformanceLog:
     def __init__(self, *, quality, mode, renderer, width=None, height=None,
-                 path=LOGS / "perf.log", interval=LOG_INTERVAL):
+                 driver=None, gl=None, gpu_vendor=None, scenario=None, path=LOGS / "perf.log", interval=LOG_INTERVAL):
         self.path = path
         self.interval = interval
         simulation_only = mode == "headless-self-test"
@@ -61,6 +64,10 @@ class PerformanceLog:
             "quality": quality,
             "mode": mode,
             "renderer": renderer,
+            "driver": driver,
+            "gl": gl,
+            "gpu_vendor": gpu_vendor,
+            "scenario": scenario,
             "width": width,
             "height": height,
             "timing_kind": "simulation_update" if simulation_only else "render_frame",
@@ -70,6 +77,7 @@ class PerformanceLog:
         self.started = self.window_started = perf_counter()
         self.closed = False
         self.writable = True
+        self.count_entities = dict
         self._write("start", 0.0)
 
     @classmethod
@@ -82,10 +90,15 @@ class PerformanceLog:
             mode = "benchmark"
         else:
             mode = "offscreen" if options.offscreen else "live"
+        graphics = app.win.get_gsg()
         return cls(
             quality=app.quality, mode=mode,
-            renderer=app.win.get_gsg().get_driver_renderer() or "unknown",
+            renderer=graphics.get_driver_renderer() or "unknown",
             width=app.win.get_x_size(), height=app.win.get_y_size(),
+            driver=graphics.get_driver_version(),
+            gpu_vendor=graphics.get_driver_vendor(),
+            gl=f"{graphics.get_driver_version_major()}.{graphics.get_driver_version_minor()}",
+            scenario=getattr(options, "scenario", None) if options.benchmark else None,
         )
 
     def _write(self, event, wall_seconds, stats=None):
@@ -96,6 +109,7 @@ class PerformanceLog:
             "event": event,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "wall_seconds": wall_seconds,
+            "entities": self.count_entities(),
         }
         if stats is not None:
             entry.update(stats)

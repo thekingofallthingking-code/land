@@ -282,6 +282,8 @@ class Vehicle:
         physics.attachRigidBody(self.body)
 
         self._paint, self._headlamps, self._taillamps, self._silhouette = _body_mesh(self.node, spec, kind)
+        self._emergency_lamps = self._create_emergency_lamps() if kind == "police" else ()
+        self._emergency_phase = -1
         self._paint.flattenStrong()
         self._headlights_nodes = [self._create_headlight(side) for side in (-1, 1)]
         self.chassis = BulletVehicle(physics, self.body)
@@ -398,6 +400,35 @@ class Vehicle:
         path.setPos(side * self.spec["width"] * 0.31, self.spec["length"] * 0.5, 0.24)
         path.lookAt(Point3(side * self.spec["width"] * 0.39, 18, -0.83))
         return path
+
+    def _create_emergency_lamps(self):
+        width = self.spec["width"] * .5
+        roof = self.spec["height"] - .49
+        lamps = []
+        for side, tint in ((-1, (.18, .51, 1, 1)), (1, (1, .19, .11, 1))):
+            mesh = _Mesh("emergency lamp")
+            mesh.box((side * width * .28, -.09, roof + .125),
+                     (width * .225, .122, .051), tint)
+            lamp = mesh.attach(self.node, "Emergency flash")
+            lamp.set_shader_off(1)
+            lamp.set_light_off(1)
+            lamp.set_color_scale(2.2, 2.2, 2.2, 1)
+            lamp.hide()
+            lamps.append(lamp)
+        return tuple(lamps)
+
+    def set_emergency_lights(self, elapsed, enabled):
+        if not self._emergency_lamps:
+            return
+        phase = int(elapsed * 7.0) % 2 if enabled else -1
+        if phase == self._emergency_phase:
+            return
+        self._emergency_phase = phase
+        for index, lamp in enumerate(self._emergency_lamps):
+            if index == phase:
+                lamp.show()
+            else:
+                lamp.hide()
 
     def _load_sound(self, name):
         path = ASSETS / f"{name}.wav"
