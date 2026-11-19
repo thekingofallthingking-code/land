@@ -12,6 +12,7 @@ from time import monotonic
 PROJECT = Path(__file__).resolve().parents[2]
 INTERACTIVE_TIMEOUT = 4 * 60 * 60
 TEST_TIMEOUT = 90
+DIAG_TIMEOUT = 25
 PYPI = "https://pypi.org/simple"
 PYTHON_FLAGS = ("-E", "-s")
 PYTHON_CHECK = (
@@ -65,13 +66,20 @@ def setup():
                 environment[name] = str(scratch)
 
             venv = project_path(".venv")
-            if os.name == "nt":
+            portable = sys.platform == "win32" and Path(sys.executable).parent.resolve() == project_path(
+                ".venv", "portable"
+            ).resolve()
+            if portable:
+                python_path = project_path(".venv", "portable", "python.exe")
+            elif os.name == "nt":
                 python_path = project_path(".venv", "Scripts", "python.exe")
             else:
                 # A standard POSIX venv can link its Python executable to the base interpreter.
                 python_path = project_path(".venv", "bin") / "python"
             python = str(python_path)
-            if python_path.is_file():
+            if portable:
+                run_setup_step("Checking portable Python", [python, "-c", PYTHON_CHECK], 15, environment, log)
+            elif python_path.is_file():
                 try:
                     run_setup_step("Checking Python", [python, "-c", PYTHON_CHECK], 15, environment, log)
                 except (OSError, RuntimeError):
@@ -91,7 +99,11 @@ def setup():
                 "--timeout", "20", "--cache-dir", str(project_path("logs", "pip-cache")),
             ]
             install = ["install", "--index-url", PYPI, "--only-binary=:all:"]
-            run_setup_step("Updating pip", pip + install + ["--upgrade", "pip"], 180, environment, log)
+            if portable:
+                packages = project_path(".venv", "portable", "packages")
+                install += ["--target", str(packages), "--upgrade"]
+            else:
+                run_setup_step("Updating pip", pip + install + ["--upgrade", "pip"], 180, environment, log)
             run_setup_step(
                 "Installing pinned dependencies", pip + install + ["-r", str(project_path("requirements.txt"))],
                 300, environment, log,
@@ -148,13 +160,17 @@ def main(arguments):
             return 1
     if arguments and arguments[0] == "run":
         return run_python(["-m", "game", *arguments[1:]], INTERACTIVE_TIMEOUT)
-    if arguments and arguments[0] == "test":
+    if arguments and arguments[0] in {"test", "test-rendered"}:
         deadline = monotonic() + TEST_TIMEOUT
         unit_status = run_python(["-m", "unittest", "discover", "-s", "tests"], 10)
         if unit_status:
             return unit_status
-        return run_python(["-m", "game", "--self-test", *arguments[1:]], deadline - monotonic())
-    print("Usage: launch.py {setup|run|test}", file=sys.stderr)
+        rendered = ("--offscreen", "--quality", "Low", "--width", "640", "--height", "360")
+        defaults = rendered if arguments[0] == "test-rendered" else ()
+        return run_python(["-m", "game", "--self-test", *defaults, *arguments[1:]], deadline - monotonic())
+    if arguments == ["diag"]:
+        return run_python(["-m", "game.tools.diag"], DIAG_TIMEOUT)
+    print("Usage: launch.py {setup|run|test|test-rendered|diag}", file=sys.stderr)
     return 2
 
 

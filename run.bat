@@ -1,9 +1,11 @@
 @echo off
 setlocal DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 1
-if not exist ".venv\Scripts\python.exe" (
-    echo FAIL - Run setup.bat to create the project environment.
+set "HARBOR_PYTHON=.venv\portable\python.exe"
+if not exist "%HARBOR_PYTHON%" set "HARBOR_PYTHON=.venv\Scripts\python.exe"
+if not exist "%HARBOR_PYTHON%" (
+    echo FAIL - Run setup.bat to create the project runtime.
     exit /b 1
 )
-".venv\Scripts\python.exe" -I "game\tools\launch.py" run %*
+"%HARBOR_PYTHON%" -I "game\tools\launch.py" run %*
 exit /b %errorlevel%

@@ -1,4 +1,8 @@
+SECTION 3 PARTIAL
+
 # Harbor City handoff
+
+Section 3 Step 0 passed on Linux. The five-unit baseline and 65.0-second headless replay passed. Added docs/SECTION_3.md and a fresh-PC bootstrap that downloads and verifies official CPython and pip inside the project. The Windows execution path remains unverified. Native GPU results were unavailable. The Section 2 verification and Windows checks follow.
 
 ## Section 2 — The City Comes Alive
 

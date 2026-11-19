@@ -29,3 +29,9 @@
 - 2026-11-19 20:49 UTC (+13 min) — P0 gate passed. Five unit tests and the 65.0-second headless replay passed, including 2,988 sampled ticks, 9 owned/parked cars, 9 traffic cars and 16 active pedestrians at finish. An 18.0-second rendered replay and Linux bootstrap passed. Recorded the P0 checkpoint before Section 2 optional features.
 - 2026-11-19 20:53 UTC (+17 min) — Dock Run, streamed bench props, crowd ambience and static bullet marks were wired and exercised. A worker hit a usage limit during optional work, so stabilized the current build and deferred NPC group chatting and bench use.
 - 2026-11-19 20:55 UTC (+19 min) — Final Section 2 tests passed five unit tests, the 65.0-second headless replay and a 20.0-second rendered replay, including Dock Run and its reward. Verified recorded perf entries for headless, offscreen and benchmark. The 1080p Medium llvmpipe drive measured 8.2 FPS. Updated Windows verification checklist and packaged the final checkpoint.
+
+## Section 3 — Chaos, Police and Polish
+
+- 2026-11-19 20:58:10 UTC — Session started on Linux from `39d2633`. Read AGENTS.md and HANDOFF.md. Existing logs identify the graphics device as llvmpipe or headless. No supplied real-GPU result was available for tuning. Started the Step 0 regression replay and Windows launcher review.
+- 2026-11-19 20:59 UTC (+1 min) — The Section 2 baseline passed on Linux with five unit tests and a full 65.0-second headless run. Added the Section 3 specification to docs. The Windows launcher review found no clean-machine Python bootstrap and no diag.bat. The replacement uses a hash-pinned official embeddable Python and PyPI pip inside the project.
+- 2026-11-19 21:04 UTC (+6 min) — Wanted thresholds, search, cooldown and reload checks passed. Inspected the Section 2 events. They generally carry position and actors without witness identities. Adapted them with a live actor and Bullet line-of-sight check. Already supplied witness lists are directly honored.
