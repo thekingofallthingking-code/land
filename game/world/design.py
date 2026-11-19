@@ -34,6 +34,10 @@ GRASS = (.30, .40, .29)
 DEEP_GRASS = (.23, .36, .29)
 ROAD = (.19, .22, .25)
 SIDEWALK = .18
+SHOP_POSITION = (15.6, 46, SIDEWALK + .01)
+HOSPITAL_POSITION = (13.5, -28, SIDEWALK + .01)
+SHOP_NAME = "Tideway Supply"
+HOSPITAL_NAME = "Breakwater Clinic"
 
 PIXEL_FONT = {
     "A": (2, 5, 7, 5, 5), "B": (6, 5, 6, 5, 6), "C": (3, 4, 4, 4, 3),
@@ -308,6 +312,53 @@ def shop_awning(mesh, glow, x, y, label):
     lettering(glow, "south", y - .749, x, 3.08, .109, label, (.99, .67, .32))
 
 
+def landmark_frontage(mesh, glow, collider, x, y, width, depth, name,
+                      facade, accent, lit_glass):
+    """A street-facing storefront with a clear approach from the west."""
+    west = x - width * .5
+    structure(mesh, collider, x, y, width, depth, SIDEWALK, 4.6, facade)
+    mesh.box((x, y, 4.79), (width + .3, depth + .4, .25), accent)
+    mesh.box((west - .35, y, 3.42), (1.2, depth - .7, .20), accent)
+    mesh.slab(12.35, y - 1.38, west, y + 1.38, .194, (.61, .59, .53))
+    panel(mesh, "west", west - .056, y - 1.13, y + 1.13, SIDEWALK, 3.08, TRIM)
+    panel(mesh, "west", west - .065, y - .90, y + .90, .45, 2.85, GLASS[1])
+    mesh.box((west - .084, y, 1.62), (.10, .065, 2.51), accent)
+    for offset in (-3.15, 3.15):
+        center = y + offset
+        panel(mesh, "west", west - .072, center - 1.50, center + 1.50,
+              1.30, 3.0, TRIM)
+        panel(mesh, "west", west - .083, center - 1.37, center + 1.37,
+              1.41, 2.88, GLASS[1])
+        panel(glow, "west", west - .12, center - 1.37, center + 1.37,
+              1.41, 2.88, lit_glass)
+    panel(mesh, "west", west - .065, y - 4.93, y + 4.93, 3.71, 4.56, accent)
+    lettering(mesh, "west", west - .095, y, 3.83, .131, name.upper(), WHITE)
+    lettering(glow, "west", west - .12, y, 3.83, .131, name.upper(), lit_glass)
+    return west
+
+
+def supply_store(mesh, glow, collider):
+    feet_x, y, _ = SHOP_POSITION
+    west = landmark_frontage(mesh, glow, collider, feet_x + 7.8, y, 9.8, 12.4,
+                             SHOP_NAME, (.38, .45, .43), (.46, .25, .16),
+                             (.98, .72, .44))
+    for y_end in (y - 5.5, y + 5.5):
+        mesh.box((west - .33, y_end, 1.77), (.29, .31, 3.18), (.27, .29, .26))
+
+
+def clinic(mesh, glow, collider, iy):
+    feet_x, world_y, _ = HOSPITAL_POSITION
+    y = world_y - iy * CHUNK_SIZE
+    west = landmark_frontage(mesh, glow, collider, feet_x + 6.95, y, 6.7, 15.4,
+                             HOSPITAL_NAME, (.65, .68, .62), (.14, .38, .40),
+                             (.66, .85, .83))
+    mesh.box((west + .33, y, 5.46), (1.14, 2.4, 1.24), (.19, .43, .45))
+    for canvas, plane, color in ((mesh, west - .265, WHITE),
+                                 (glow, west - .29, (.71, .94, .92))):
+        panel(canvas, "west", plane, y - .17, y + .17, 5.02, 5.90, color)
+        panel(canvas, "west", plane, y - .44, y + .44, 5.29, 5.63, color)
+
+
 def downtown(mesh, glow, collider, ix, iy, rng):
     central = (ix, iy) == (0, 0)
     if central:
@@ -322,11 +373,11 @@ def downtown(mesh, glow, collider, ix, iy, rng):
             mesh.slab(x, 15.4, x + .045, 57.6, .19, (.36, .38, .37))
         for y in range(18, 58, 3):
             mesh.slab(16.4, y, 63.6, y + .045, .19, (.36, .38, .37))
-        kiosk(mesh, glow, collider, 29, 46, "ATLAS", (.33, .42, .44))
-        mesh.box((17.2, 41, 1.81), (.46, 4.9, 3.26), (.23, .30, .34))
-        mesh.box((16.95, 41, 2.86), (.09, 4.67, .83), (.10, .29, .33))
-        lettering(mesh, "west", 16.895, 41, 2.68, .098, "EXCHANGE", (.88, .82, .60))
-        lettering(glow, "west", 16.883, 41, 2.68, .098, "EXCHANGE", (.91, .79, .54))
+        supply_store(mesh, glow, collider)
+        mesh.box((17.2, 36, 1.81), (.46, 4.9, 3.26), (.23, .30, .34))
+        mesh.box((16.95, 36, 2.86), (.09, 4.67, .83), (.10, .29, .33))
+        lettering(mesh, "west", 16.895, 36, 2.68, .098, "EXCHANGE", (.88, .82, .60))
+        lettering(glow, "west", 16.883, 36, 2.68, .098, "EXCHANGE", (.91, .79, .54))
         bench(mesh, 24, 25, "west")
         bench(mesh, 24, 32, "west")
         for x, y in ((35, 30), (44, 30), (53, 30), (57, 46)):
@@ -336,6 +387,8 @@ def downtown(mesh, glow, collider, ix, iy, rng):
     else:
         tower(mesh, glow, collider, 43, 43, rng)
         tower(mesh, glow, collider, 45, 104, rng)
+        if (ix, iy) == (0, -1):
+            clinic(mesh, glow, collider, iy)
     tower(mesh, glow, collider, 105, 42, rng)
     tower(mesh, glow, collider, 104, 104, rng)
     names = ("TIDEWAY", "ATLAS", "NORTHLINE", "SEAGLASS", "UNION")

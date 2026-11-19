@@ -1,6 +1,7 @@
 """Generate Harbor City's original audio locally with NumPy and the wave module."""
 
 from argparse import ArgumentParser
+from functools import partial
 from math import tau
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -13,7 +14,7 @@ from numpy.typing import NDArray
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ASSET_DIR = PROJECT_ROOT / "assets_generated"
 SAMPLE_RATE = 44_100
-AUDIO_VERSION = b"1\n"
+AUDIO_VERSION = b"2\n"
 Audio = NDArray[np.float64]
 
 
@@ -91,11 +92,68 @@ def _harbor(frames: int) -> Audio:
     return np.stack((middle + width, middle - width), axis=1)
 
 
+def _horn(frames: int) -> Audio:
+    t = _time(frames)
+    envelope = (1 - np.exp(-110 * t)) * np.clip((t[-1] - t) / .062, 0, 1)
+    tone = np.zeros(frames)
+    for frequency, weight in ((407, 1.0), (511, .78)):
+        phase = tau * (frequency * t + .24 * np.sin(tau * 5 * t))
+        tone += weight * (np.sin(phase) + .31 * np.sin(2 * phase) + .18 * np.sin(3 * phase))
+    return np.tanh(tone * .68) * envelope
+
+
+def _arcade_report(frames: int, *, seed: int, tone: float, decay: float, weight: float) -> Audio:
+    t = _time(frames)
+    rng = np.random.default_rng(seed)
+    punch_phase = tau * (tone * t + tone * .8 * (1 - np.exp(-40 * t)) / 40)
+    punch = np.sin(punch_phase) * np.exp(-decay * .72 * t)
+    snap = _band_noise(rng, frames, 530, 5100) * np.exp(-decay * 2.4 * t)
+    wash = _band_noise(rng, frames, 145, 1900) * np.exp(-decay * .56 * t)
+    body = (weight * punch + .71 * snap + .29 * wash) * (1 - np.exp(-1480 * t))
+    tail_age = np.maximum(0, t - .056)
+    tail = .13 * (1 - np.exp(-180 * tail_age)) * np.exp(-17 * tail_age) * wash
+    return np.tanh((body + tail) * 1.23) * np.clip((t[-1] - t) / .026, 0, 1)
+
+
+def _swing(frames: int) -> Audio:
+    t = _time(frames)
+    rng = np.random.default_rng(1736)
+    air = _band_noise(rng, frames, 250, 2100) * np.sin(np.pi * t / t[-1]) ** 3
+    thump_age = np.maximum(0, t - .082)
+    thump = np.sin(tau * 92 * thump_age) * np.exp(-50 * thump_age) * (1 - np.exp(-800 * thump_age))
+    return (.45 * air + .81 * thump) * np.clip((t[-1] - t) / .032, 0, 1)
+
+
+def _gear_click(frames: int, *, offsets: tuple[float, ...]) -> Audio:
+    t = _time(frames)
+    rng = np.random.default_rng(819)
+    texture = _band_noise(rng, frames, 900, 5100)
+    signal = np.zeros(frames)
+    for index, offset in enumerate(offsets):
+        age = np.maximum(0, t - offset)
+        click = texture + .42 * np.sin(tau * (390 + 114 * index) * age)
+        signal += click * (1 - np.exp(-1200 * age)) * np.exp(-(92 + index * 14) * age)
+    return np.tanh(signal) * np.clip((t[-1] - t) / .021, 0, 1)
+
+
 _AUDIO = {
     "engine.wav": (_engine, 2 * SAMPLE_RATE, 1, 0.79),
     "tire.wav": (_tire, 2 * SAMPLE_RATE, 1, 0.61),
     "crash.wav": (_crash, SAMPLE_RATE, 1, 0.90),
     "harbor.wav": (_harbor, 12 * SAMPLE_RATE, 2, 0.38),
+    "horn.wav": (_horn, round(.48 * SAMPLE_RATE), 1, .74),
+    "weapon-pistol.wav": (partial(_arcade_report, seed=633, tone=103, decay=20, weight=.80),
+                          round(.33 * SAMPLE_RATE), 1, .90),
+    "weapon-smg.wav": (partial(_arcade_report, seed=143, tone=145, decay=32, weight=.64),
+                       round(.21 * SAMPLE_RATE), 1, .88),
+    "weapon-shotgun.wav": (partial(_arcade_report, seed=817, tone=69, decay=13.2, weight=1.04),
+                           round(.50 * SAMPLE_RATE), 1, .93),
+    "weapon-rifle.wav": (partial(_arcade_report, seed=313, tone=89, decay=24, weight=.9),
+                         round(.30 * SAMPLE_RATE), 1, .91),
+    "weapon-melee.wav": (_swing, round(.21 * SAMPLE_RATE), 1, .66),
+    "weapon-dry.wav": (partial(_gear_click, offsets=(0,)), round(.09 * SAMPLE_RATE), 1, .52),
+    "weapon-reload.wav": (partial(_gear_click, offsets=(0, .117, .235)),
+                          round(.34 * SAMPLE_RATE), 1, .56),
 }
 
 

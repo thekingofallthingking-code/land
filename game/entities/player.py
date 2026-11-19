@@ -246,7 +246,15 @@ class Player:
         self._rig_root.set_z(-self._FOOT_OFFSET)
         self._rig = _Rig(self._rig_root)
         self.health = 100.0
-        self.money = 0
+        self.armor = 0.0
+        self.money = 180
+        self.weapon_socket = self._rig.arms[1][1].attach_new_node("right-hand prop")
+        self.weapon_socket.set_pos(.008, .013, -.241)
+        self.weapon_socket.set_p(-90)
+        self._armed = False
+        self._aiming = False
+        self._combat_pitch = 0.0
+        self._action_pose = 0.0
         self.active = False
         self._velocity = Vec3()
         self._jump_held = False
@@ -336,7 +344,7 @@ class Player:
         if self.active:
             self.physics.attach_character(self.controller)
 
-    def move(self, forward, strafe, camera_heading, sprint, jump, dt):
+    def move(self, forward, strafe, camera_heading, sprint, jump, dt, *, aiming=False):
         if not self.active or dt <= 0:
             return
         radians = math.radians(camera_heading)
@@ -347,8 +355,10 @@ class Player:
         velocity = Vec3()
         if strength > .001:
             direction.normalize()
-            velocity = direction * strength * (self.SPRINT_SPEED if sprint else self.WALK_SPEED)
-            desired_heading = math.degrees(math.atan2(-direction.x, direction.y))
+            speed = self.WALK_SPEED * .69 if aiming else self.SPRINT_SPEED if sprint else self.WALK_SPEED
+            velocity = direction * strength * speed
+        if aiming or strength > .001:
+            desired_heading = camera_heading if aiming else math.degrees(math.atan2(-direction.x, direction.y))
             yaw_difference = (desired_heading - self.heading + 180) % 360 - 180
             self._rig_root.set_h(self.heading + yaw_difference * (1 - math.exp(-16 * dt)))
         responsiveness = 15 if self.grounded else 4.2
@@ -363,6 +373,14 @@ class Player:
             self._jump_buffer = 0
         self._jump_buffer = max(0, self._jump_buffer - dt)
 
+    def combat_pose(self, *, armed, aiming, pitch):
+        self._armed = armed
+        self._aiming = aiming
+        self._combat_pitch = pitch
+
+    def attack_pose(self):
+        self._action_pose = .24
+
     def animate(self, dt):
         if not self.active or dt <= 0:
             return
@@ -371,6 +389,19 @@ class Player:
         self._last_feet = feet
         planar_speed = min(self.SPRINT_SPEED, math.hypot(travel.x, travel.y) / dt)
         self._rig.update(dt, planar_speed, self.grounded)
+        if self._armed or self._action_pose > 0:
+            right, wrist = self._rig.arms[1]
+            left, support = self._rig.arms[0]
+            kick = self._action_pose * 30
+            if self._aiming or not self._armed:
+                right.set_hpr(-9, 76 - self._combat_pitch, 3)
+                wrist.set_p(14 + kick)
+                left.set_hpr(18, 62 - self._combat_pitch, -4)
+                support.set_p(25)
+            else:
+                right.set_hpr(-12, 23 + kick, 10)
+                wrist.set_p(41)
+        self._action_pose = max(0.0, self._action_pose - dt)
 
     def close(self):
         self.set_active(False)

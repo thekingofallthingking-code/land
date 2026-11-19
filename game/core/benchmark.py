@@ -1,7 +1,5 @@
 """Repeatable city driving benchmark for Linux and Windows graphics drivers."""
 import logging
-import math
-import statistics
 import time
 
 from game.app import Controls
@@ -30,27 +28,24 @@ def run_benchmark(app, frames, duration):
     for _ in range(WARMUP_FRAMES):
         _drive_frame(app)
 
-    samples = []
     for _ in range(frames):
         before = time.perf_counter()
         if before - start >= duration:
             break
         _drive_frame(app)
-        samples.append(time.perf_counter() - before)
-    if not samples:
+        app.performance.record(time.perf_counter() - before)
+    results = app.performance.summary()
+    if not results["count"]:
         raise RuntimeError("Benchmark timed out during warm-up.")
 
-    elapsed = sum(samples)
-    p99 = sorted(samples)[math.ceil(.99 * len(samples)) - 1]
-    fps = len(samples) / elapsed
-    median_ms = statistics.median(samples) * 1000
     renderer = app.win.get_gsg().get_driver_renderer()
     logging.info(
         "DRIVE BENCHMARK | %s | %d×%d | %s | %d/%d frames in %.2fs | "
-        "%.1f average FPS | %.1fms median | %.1fms p99 | %.0f km/h | %d chunks",
+        "%.1f average FPS | %.1fms median | %.1fms p95 | %.1fms p99 | %.0f km/h | %d chunks",
         app.quality, app.win.get_x_size(), app.win.get_y_size(), renderer,
-        len(samples), frames, elapsed, fps, median_ms, p99 * 1000,
+        results["count"], frames, results["timed_seconds"], results["fps"],
+        results["median_ms"], results["p95_ms"], results["p99_ms"],
         app.occupied.speed_kph, len(app.city.loaded_chunks),
     )
-    if len(samples) < frames:
+    if results["count"] < frames:
         raise RuntimeError("Benchmark reached its time limit. Retry with fewer --frames.")

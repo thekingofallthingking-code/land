@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "offers": [
+    {"weapon": "pistol", "price": 75, "rounds": 24, "ammo_price": 20},
+    {"weapon": "smg", "price": 135, "rounds": 56, "ammo_price": 38},
+    {"weapon": "shotgun", "price": 170, "rounds": 18, "ammo_price": 34},
+    {"weapon": "rifle", "price": 245, "rounds": 48, "ammo_price": 45}
+  ],
+  "armor_price": 55
+}

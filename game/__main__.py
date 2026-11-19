@@ -68,8 +68,11 @@ def render_frames(app, options):
         app.task_mgr.step()
     started = time.perf_counter()
     for _ in range(options.frames):
+        before = time.perf_counter()
         app.advance(STEP, Controls())
         app.task_mgr.step()
+        app.graphicsEngine.sync_frame()
+        app.performance.record(time.perf_counter() - before)
     seconds = time.perf_counter() - started
     print(f"OFFSCREEN {options.frames} frames / {seconds:.2f} s = "
           f"{options.frames / max(seconds, .0001):.1f} FPS | "

@@ -2,9 +2,9 @@
 
 Read `HANDOFF.md` at session start. With no handoff, start Section 1. Complete only the first unfinished section. Record start time, decisions, elapsed milestones, checkpoints and verification in `PROGRESS.md`. Keep each session within ~5 hours, with P0 by ~3h30, P1 by ~4h and the last 45–60 minutes for stabilization. Test all P0 before starting P1. With less than 15% budget left, stabilize, update the handoff and commit. Checkpoint after milestones and every 30–45 minutes. Verify that each checkpoint launches.
 
-On Windows work inside `C:\Projects\HarborCity`. Resolve paths before moves or deletions. Use no elevation, registry, system settings or personal files. Use official PyPI for packages and only official per-user Python installation if required. Keep builds, generated files and logs local. Give every test or launch a timeout and clean up child processes.
+On Windows work inside `C:\Projects\HarborCity`. In the selected Linux cloud workspace use the existing HarborCity project folder as the boundary. Resolve paths before moves or deletions. Use no elevation, registry, system settings or personal files. Use official PyPI for packages and only official per-user Python installation if required. Keep builds, generated files and logs local. Give every test or launch a timeout and clean up child processes.
 
-Use original procedural art, models and audio. Keep violence arcade-style and non-graphic. Prioritize a playable, stable city. Report test evidence and unverified features separately in the handoff. Log repeated failures in `KNOWN_ISSUES.md` after three attempts.
+Use original procedural art, models and audio. Keep violence arcade-style and non-graphic. Prioritize a playable, stable city. Report test evidence and list launch, audio, real-GPU FPS and handling checks under “Needs checking on Windows” in the handoff. All runs write timing to logs/perf.log. Log repeated failures in `KNOWN_ISSUES.md` after three attempts.
 
 ## Commands
 

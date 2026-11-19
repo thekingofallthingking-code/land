@@ -1,10 +1,34 @@
 {
   "schema": 1,
   "weapons": [
-    {"id": "pistol", "slot": 1, "name": "Breakwater 9", "damage": 24, "capacity": 12, "rounds_per_second": 4.2, "reload_seconds": 1.55, "spread_degrees": 1.4, "recoil_degrees": 2.5, "pellets": 1},
-    {"id": "smg", "slot": 2, "name": "Kelpworks M3", "damage": 14, "capacity": 28, "rounds_per_second": 10, "reload_seconds": 1.9, "spread_degrees": 2.5, "recoil_degrees": 1.4, "pellets": 1},
-    {"id": "shotgun", "slot": 3, "name": "Sound Pump", "damage": 12, "capacity": 6, "rounds_per_second": 1.15, "reload_seconds": 2.7, "spread_degrees": 6.0, "recoil_degrees": 5.8, "pellets": 9},
-    {"id": "rifle", "slot": 4, "name": "Tern A4", "damage": 25, "capacity": 24, "rounds_per_second": 7.3, "reload_seconds": 2.1, "spread_degrees": 1.5, "recoil_degrees": 1.9, "pellets": 1},
-    {"id": "melee", "slot": 5, "name": "Unarmed", "damage": 18, "reach_meters": 1.6, "rounds_per_second": 1.7}
+    {
+      "id": "pistol", "slot": 1, "name": "Breakwater 9", "starting": true,
+      "damage": 24, "capacity": 12, "starter_reserve": 48, "reserve_limit": 240,
+      "rounds_per_second": 4.2, "reload_seconds": 1.55, "range_meters": 90,
+      "spread_degrees": 1.4, "recoil_degrees": 2.5, "head_multiplier": 2.0
+    },
+    {
+      "id": "smg", "slot": 2, "name": "Kelpworks M3", "automatic": true,
+      "damage": 14, "capacity": 28, "starter_reserve": 84, "reserve_limit": 400,
+      "rounds_per_second": 10, "reload_seconds": 1.9, "range_meters": 80,
+      "spread_degrees": 2.5, "recoil_degrees": 1.4, "head_multiplier": 1.8
+    },
+    {
+      "id": "shotgun", "slot": 3, "name": "Sound Pump", "pellets": 9,
+      "damage": 12, "capacity": 6, "starter_reserve": 24, "reserve_limit": 120,
+      "rounds_per_second": 1.15, "reload_seconds": 2.7, "range_meters": 46,
+      "spread_degrees": 6.0, "recoil_degrees": 5.8, "head_multiplier": 1.55
+    },
+    {
+      "id": "rifle", "slot": 4, "name": "Tern A4", "automatic": true,
+      "damage": 25, "capacity": 24, "starter_reserve": 72, "reserve_limit": 360,
+      "rounds_per_second": 7.3, "reload_seconds": 2.1, "range_meters": 165,
+      "spread_degrees": 1.5, "recoil_degrees": 1.9, "head_multiplier": 2.0
+    },
+    {
+      "id": "melee", "slot": 5, "name": "Unarmed", "starting": true,
+      "damage": 18, "range_meters": 1.6, "rounds_per_second": 1.7,
+      "recoil_degrees": 0.85
+    }
   ]
 }

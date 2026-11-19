@@ -34,14 +34,17 @@ class ThirdPersonCamera:
         self._vehicle = None
         self._pivot = None
         self._boom_fraction = 1.0
+        self._aim = 0.0
+        self._recoil = 0.0
 
     def mouse(self, dx, dy):
         if self.hood_view and self._vehicle is not None:
             self._hood_yaw = min(87, max(-87, self._hood_yaw - dx * self.sensitivity))
             self._hood_pitch = min(30, max(-22, self._hood_pitch - dy * self.sensitivity))
             return
-        self.heading = (self.heading - dx * self.sensitivity) % 360
-        self.pitch = min(64, max(-15, self.pitch + dy * self.sensitivity))
+        rate = self.sensitivity * (1 - .35 * self._aim)
+        self.heading = (self.heading - dx * rate) % 360
+        self.pitch = min(64, max(-15, self.pitch + dy * rate))
         if abs(dx) + abs(dy) > .02:
             self._orbit_time = 2.3
 
@@ -51,6 +54,9 @@ class ThirdPersonCamera:
             self._hood_yaw = self._hood_pitch = 0.0
             self._pivot = None
             self._boom_fraction = 1.0
+
+    def recoil(self, degrees):
+        self._recoil = min(13.0, self._recoil + degrees)
 
     def _clip(self, origin, desired, right, ignore):
         ray = desired - origin
@@ -85,13 +91,14 @@ class ThirdPersonCamera:
         self.node.set_pos(position)
         self.node.look_at(Point3(position + chassis.xform(look)), chassis.xform(_UP))
 
-    def update(self, dt, player, vehicle=None, snap=False):
+    def update(self, dt, player, vehicle=None, snap=False, *, aiming=False):
         dt = max(0, dt)
         if self._vehicle is not vehicle:
             self._vehicle = vehicle
             self.hood_view = False
             self._orbit_time = 0
             self.pitch = 13
+            self._recoil = 0
             if vehicle is not None:
                 self.heading = vehicle.heading
             snap = True
@@ -99,12 +106,15 @@ class ThirdPersonCamera:
             self._update_hood(vehicle)
             return
         self._orbit_time = max(0, self._orbit_time - dt)
+        sight = float(aiming and vehicle is None)
+        self._aim = sight if snap else self._aim + (sight - self._aim) * _blend(dt, 13)
+        self._recoil *= math.exp(-8 * dt)
 
         ignore = (player.controller,)
         if vehicle is None:
-            pivot = player.position + _UP * (player.EYE_HEIGHT - .13)
-            distance = 4.6
-            shoulder = .51
+            pivot = player.position + _UP * (player.EYE_HEIGHT - .13 + .10 * self._aim)
+            distance = 4.6 - 2.62 * self._aim
+            shoulder = .51 + .28 * self._aim
         else:
             ignore += (vehicle.body,)
             pivot = vehicle.camera_focus()
@@ -121,7 +131,7 @@ class ThirdPersonCamera:
             self._pivot += (pivot - self._pivot) * _blend(dt, 16 if vehicle is None else 13)
 
         ahead, right = _axes(self.heading)
-        elevated = math.radians(self.pitch)
+        elevated = math.radians(self.pitch - self._recoil)
         offset = -ahead * math.cos(elevated) + _UP * math.sin(elevated)
         desired = self._pivot + offset * distance + right * shoulder
         safe = self._clip(pivot, desired, right, ignore)

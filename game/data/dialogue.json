@@ -2,16 +2,34 @@
   "schema": 1,
   "lines": {
     "commuter": {
-      "calm": ["Good evening. You heading toward the water?", "The lights take forever at this corner."],
-      "angry": ["Give me some room.", "I've got nothing to say to you."]
+      "calm": ["Morning. Is this the way to Tideway?", "I could walk there twice before this light changes.", "The water looks silver from the bridge.", "Busy out here today."],
+      "annoyed": ["Watch where you're going.", "Can I get by?", "Ever heard of personal space?"],
+      "angry": ["Back off. I know who you are.", "Stay away from me.", "I'm not talking to you after that."],
+      "afraid": ["Go the other way. Get off the street!", "Did you hear that? I'm leaving.", "I want to get home."]
     },
     "dockworker": {
-      "calm": ["Wind's picking up by the slips.", "I can tell what shift it is by the gulls."],
-      "angry": ["Back off, would you?", "I know your face now."]
+      "calm": ["Wind's picking up by the slips.", "I can tell what shift it is by the gulls.", "Lost a whole lunch to a busted loading ramp today.", "Road's quieter on the other side of the docks."],
+      "annoyed": ["Easy, I'm coming through.", "That shoulder of yours have a horn?", "Watch your step, friend."],
+      "angry": ["Keep your distance. I remember you.", "You've got some nerve coming back.", "Leave me be."],
+      "afraid": ["Move away from the road!", "I'm getting behind something solid.", "Bad time for a chat."]
     },
     "local": {
-      "calm": ["Take the park road for the view.", "City's got a different hum after dark."],
-      "angry": ["Keep walking.", "You're starting trouble."]
+      "calm": ["Take the park road for the view.", "City's got a different hum after dark.", "The Strand is nice when the tide is out.", "The corner shop has been here longer than the towers."],
+      "annoyed": ["Room for both of us, you know.", "Mind the new shoes.", "I'm walking here."],
+      "angry": ["Keep walking. We're done here.", "I haven't forgotten what you did.", "Take your attitude somewhere else."],
+      "afraid": ["Something's happening down there!", "Don't stand in the open.", "Where did that come from?"]
+    },
+    "gang": {
+      "calm": ["You looking for somebody?", "No shortcuts through the yard tonight.", "A lot of people watching this corner."],
+      "annoyed": ["Do that again and see what happens.", "Pick a different sidewalk.", "You trying to get my attention?"],
+      "angry": ["We're not square.", "I told you to back away.", "I remember that."],
+      "afraid": ["Everybody out. Now.", "Keep your head down.", "I need cover."]
+    },
+    "shopkeeper": {
+      "calm": ["Welcome to Tideway Supply. What can I get you?", "Back again? Have a look around.", "I have a fresh shipment in.", "Armor's on the rack this morning."],
+      "annoyed": ["Careful around the front of the shop.", "Keep the doorway clear.", "Watch where you're pushing."],
+      "angry": ["You owe me more than an apology.", "Take a step back before we talk.", "I've got a long memory."],
+      "afraid": ["Shop's closed until this blows over.", "Get off the street. We'll talk later.", "I'm taking cover."]
     }
   }
 }

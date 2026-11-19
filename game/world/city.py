@@ -8,7 +8,10 @@ from random import Random
 from panda3d.bullet import BulletBoxShape, BulletConvexHullShape, BulletRigidBodyNode
 from panda3d.core import BitMask32, Point3, PointLight, TransformState, Vec3, Vec4
 
-from .design import DISTRICT_BUILDERS, POST, street_lamp, street_surfaces, traffic_signal
+from .design import (
+    DISTRICT_BUILDERS, HOSPITAL_NAME, HOSPITAL_POSITION, POST, SHOP_NAME, SHOP_POSITION,
+    street_lamp, street_surfaces, traffic_signal,
+)
 from .mesh import Mesh
 from .minimap import write_minimap
 from .roads import (CHUNK_MAX, CHUNK_MIN, CHUNK_SIZE, CITY_MAX, CITY_MIN,
@@ -90,6 +93,10 @@ class City:
         self.graph = RoadGraph()
         self.loaded_chunks: dict[tuple[int, int], Chunk] = {}
         self.spawn = Vec3(9.8, 22.8, .19)
+        self.hospital = Vec3(*HOSPITAL_POSITION)
+        self.hospital_name = HOSPITAL_NAME
+        self.shop = Vec3(*SHOP_POSITION)
+        self.shop_name = SHOP_NAME
         self.car_spawns = (
             ("compact", Vec3(6.35, 24, 1.0), 0),
             ("sport", Vec3(6.35, 66, 1.0), 0),

@@ -90,6 +90,31 @@ class _Mesh:
         return parent.attachNewNode(node)
 
 
+def _driver_outline(parent, low, high, belt, roof, nose, windshield_base, windshield_top):
+    mesh = _Mesh("driver outline")
+    tint = _tint(WINDOW, 0.58)
+    height = roof - belt
+    head = tuple((math.cos(i * math.tau / 10) * .112, .70 + math.sin(i * math.tau / 10) * .145)
+                 for i in range(10))
+    shoulders = ((-.20, .14), (.20, .14), (.16, .39), (.095, .55), (-.11, .55), (-.16, .39))
+
+    def side(u, fraction):
+        return (-((1 - fraction) * low + fraction * high) - .023,
+                nose - .225 + u, belt + fraction * height)
+
+    def front(u, fraction):
+        return (-low * .51 + u,
+                windshield_base[0] + (windshield_top[0] - windshield_base[0]) * fraction + .014,
+                windshield_base[1] + (windshield_top[1] - windshield_base[1]) * fraction)
+
+    for transform in (side, front):
+        for feature in (head, shoulders):
+            mesh.face(tuple(transform(*point) for point in reversed(feature)), tint)
+    driver = mesh.attach(parent, "driver outline")
+    driver.hide()
+    return driver
+
+
 def _body_mesh(parent, spec, kind):
     width, length = spec["width"] / 2, spec["length"] / 2
     color = spec["color"]
@@ -130,12 +155,16 @@ def _body_mesh(parent, spec, kind):
         (nose + nose_slope, low, low, belt - 0.01, belt + 0.015),
     ), _tint(color, 0.92))
     windows = _Mesh("windows")
-    windshield_base = (nose + nose_slope + 0.013, belt + 0.035)
-    windshield_top = (nose + 0.013, roof - 0.045)
+    base_z, top_z = belt + .057, roof - .054
+    slope_height = roof - belt - .015
+    base_slope = (roof - base_z) / slope_height
+    top_slope = (roof - top_z) / slope_height
+    windshield_base = (nose + nose_slope * base_slope + .012, base_z)
+    windshield_top = (nose + nose_slope * top_slope + .012, top_z)
     windows.face(((low * 0.89, *windshield_base), (-low * 0.89, *windshield_base),
                   (-high * 0.91, *windshield_top), (high * 0.91, *windshield_top)), WINDOW)
-    rear_base = (tail - 0.013, belt + 0.034)
-    rear_top = (tail + rear_slope - 0.013, roof - 0.045)
+    rear_base = (tail + rear_slope * (1 - base_slope) - .012, base_z)
+    rear_top = (tail + rear_slope * (1 - top_slope) - .012, top_z)
     windows.face(((-low * 0.86, *rear_base), (low * 0.86, *rear_base),
                   (high * 0.91, *rear_top), (-high * 0.91, *rear_top)), WINDOW)
     for side in (-1, 1):
@@ -171,7 +200,8 @@ def _body_mesh(parent, spec, kind):
                   (width * 0.19, 0.044, 0.052), (0.85, 0.89, 0.76, 1))
         tails.box((side * width * 0.64, -length - 0.003, belt - 0.107),
                   (width * 0.18, 0.037, 0.052), (0.80, 0.12, 0.06, 1))
-    return body_path, lamps.attach(parent, "headlamps"), tails.attach(parent, "taillamps")
+    silhouette = _driver_outline(parent, low, high, belt, roof, nose, windshield_base, windshield_top)
+    return body_path, lamps.attach(parent, "headlamps"), tails.attach(parent, "taillamps"), silhouette
 
 
 def _wheel_mesh(parent, radius, width):
@@ -215,10 +245,14 @@ class Vehicle:
         self.rpm = 850.0
         self.gear = 1
         self.occupied = False
+        self.ai_driver = False
+        self._ai_engine_volume = 0.0
         self.skid = 0.0
         self._steering = 0.0
         self._collision_cooldown = 0.0
         self._headlights = False
+        self._lamp_lenses_on = False
+        self._tail_intensity = 0.0
         self._night = 0.0
         self._braking = False
         self._handbrake = False
@@ -247,7 +281,7 @@ class Vehicle:
         self.node.setH(heading)
         physics.attachRigidBody(self.body)
 
-        self._paint, self._headlamps, self._taillamps = _body_mesh(self.node, spec, kind)
+        self._paint, self._headlamps, self._taillamps, self._silhouette = _body_mesh(self.node, spec, kind)
         self._paint.flattenStrong()
         self._headlights_nodes = [self._create_headlight(side) for side in (-1, 1)]
         self.chassis = BulletVehicle(physics, self.body)
@@ -289,6 +323,21 @@ class Vehicle:
     def physics_active(self):
         return self._physics_active
 
+    def _set_driver(self, occupied, ai_driver):
+        if (self.occupied, self.ai_driver) == (occupied, ai_driver):
+            return
+        self.occupied = occupied
+        self.ai_driver = ai_driver
+        if occupied or ai_driver:
+            self._silhouette.show()
+        else:
+            self._silhouette.hide()
+
+    def release_ai_driver(self):
+        self._set_driver(self.occupied, False)
+        self._ai_engine_volume = 0.0
+        self._update_lights()
+
     def set_physics_active(self, active):
         """Pause a car while its supporting world chunk is streamed out."""
         if self._closed or active == self._physics_active:
@@ -303,7 +352,7 @@ class Vehicle:
                 wheel.show()
             return
         self.physics.removeVehicle(self.chassis)
-        self.occupied = False
+        self._set_driver(False, False)
         self._braking = False
         self._update_lights()
         for sound in (self._engine, self._tire, self._crash):
@@ -364,29 +413,44 @@ class Vehicle:
 
     def _update_lights(self):
         lights_active = self._night > 0.42 and self.occupied and self.health > 0
+        lenses_active = self._night > 0.42 and (self.occupied or self.ai_driver) and self.health > 0
         if lights_active != self._headlights:
             for path in self._headlights_nodes:
                 if lights_active:
                     self.render.setLight(path)
                 else:
                     self.render.clearLight(path)
-            self._headlamps.setLightOff(1) if lights_active else self._headlamps.clearLight()
             self._headlights = lights_active
-        if self._braking or lights_active:
+        if lenses_active != self._lamp_lenses_on:
+            if lenses_active:
+                self._headlamps.setShaderOff(1)
+                self._headlamps.setLightOff(1)
+            else:
+                self._headlamps.clearShader()
+                self._headlamps.clearLight()
+            self._lamp_lenses_on = lenses_active
+        intensity = 1.5 if self._braking else 0.8 if lenses_active else 0.0
+        if intensity == self._tail_intensity:
+            return
+        self._tail_intensity = intensity
+        if intensity:
+            self._taillamps.setShaderOff(1)
             self._taillamps.setLightOff(1)
-            intensity = 1.5 if self._braking else 0.8
             self._taillamps.setColorScale(intensity, intensity, intensity, 1)
         else:
+            self._taillamps.clearShader()
             self._taillamps.clearLight()
             self._taillamps.clearColorScale()
 
-    def update(self, dt, throttle=0, steer=0, handbrake=False, *, occupied=False, night=0.0):
+    def update(self, dt, throttle=0, steer=0, handbrake=False, *, occupied=False,
+               ai_driver=False, service_brake=0.0, ai_engine_volume=0.0, night=0.0):
         """Apply the current inputs before stepping the Bullet world."""
         if not self._physics_active:
             return
-        self.occupied = occupied
+        self._set_driver(occupied, ai_driver)
+        self._ai_engine_volume = ai_engine_volume
         self._night = night
-        usable = occupied and self.health > 0
+        usable = (occupied or ai_driver) and self.health > 0
         throttle = max(-1.0, min(1.0, throttle)) if usable else 0.0
         steer = max(-1.0, min(1.0, steer)) if usable else 0.0
         self._handbrake = bool(handbrake and usable)
@@ -401,7 +465,8 @@ class Vehicle:
         for index in (0, 1):
             self.chassis.setSteeringValue(self._steering, index)
 
-        self._braking = throttle * speed < -2.0 or self._handbrake
+        brake_pedal = max(0.0, min(1.0, service_brake)) if usable else 0.0
+        self._braking = throttle * speed < -2.0 or self._handbrake or brake_pedal > 0.1
         engine = 0.0
         brake = 0.0
         prior_gear = self.gear
@@ -424,6 +489,8 @@ class Vehicle:
         self._accelerator = abs(throttle)
         if not usable:
             brake = 28.0 if abs(speed) > 4 else 136.0
+        elif brake_pedal > 0:
+            brake = 156.0 * brake_pedal
         elif self._braking and not self._handbrake:
             brake = 144.0 * abs(throttle)
         elif throttle:
@@ -493,6 +560,8 @@ class Vehicle:
         self.skid += ((skid_target if in_contact else 0.0) - self.skid) * min(1.0, dt * 9.0)
         self._check_collision(dt)
         engine_volume = (0.28 + 0.27 * self._accelerator) if self.occupied and self.health > 0 else 0.0
+        if self.ai_driver and self.health > 0:
+            engine_volume = self._ai_engine_volume * (0.70 + 0.30 * self._accelerator)
         self._loop(self._engine, engine_volume, min(3.5, max(0.58, self.rpm / 1650.0)))
         self._loop(self._tire, self.skid * 0.48, 0.73 + min(0.72, speed * 0.009))
 

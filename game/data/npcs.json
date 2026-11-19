@@ -1,8 +1,35 @@
 {
   "schema": 1,
   "archetypes": [
-    {"id": "commuter", "walk_mps": 1.45, "run_mps": 4.30, "courage": 0.2, "dialogue": "commuter"},
-    {"id": "dockworker", "walk_mps": 1.25, "run_mps": 3.95, "courage": 0.5, "dialogue": "dockworker"},
-    {"id": "local", "walk_mps": 1.15, "run_mps": 3.75, "courage": 0.75, "dialogue": "local"}
+    {
+      "id": "commuter", "names": ["Avery Lin", "Noor Bell", "Marin Ward", "Robin Velez"],
+      "walk_mps": 1.54, "run_mps": 4.35, "courage": 0.16, "health": 72,
+      "styles": [["#354e73", "#b8bac3"], ["#c2985c", "#354050"], ["#396d65", "#a8a678"]],
+      "districts": {"downtown": 3, "residential": 2}, "cash": [5, 17]
+    },
+    {
+      "id": "dockworker", "names": ["Casey Rusk", "Iggy Ross", "Sol Anand", "Reese Wells"],
+      "walk_mps": 1.32, "run_mps": 3.95, "courage": 0.46, "health": 90,
+      "styles": [["#c88227", "#435461"], ["#875735", "#5d6a39"], ["#a9b550", "#365f71"]],
+      "districts": {"harbor": 4, "downtown": 2}, "cash": [9, 27], "hat": "beanie"
+    },
+    {
+      "id": "local", "names": ["Dani Soto", "Ellis Shaw", "Indra Keel", "Rowan Okafor"],
+      "walk_mps": 1.24, "run_mps": 3.80, "courage": 0.34, "health": 81,
+      "styles": [["#855b7a", "#9e6958"], ["#537d77", "#d59955"], ["#98565b", "#596876"]],
+      "districts": {"residential": 3, "park": 4, "beachfront": 4}, "cash": [6, 22]
+    },
+    {
+      "id": "gang", "names": ["Jules Pike", "Tobin Crest", "Sam Coyle", "Nic Vega"],
+      "walk_mps": 1.45, "run_mps": 4.20, "courage": 0.88, "health": 95,
+      "styles": [["#713d51", "#c58b71"], ["#4f3b63", "#9c7184"]],
+      "districts": {"harbor": 2, "downtown": 1}, "cash": [18, 43],
+      "hat": "cap", "weapon": "pistol", "rounds": 7, "attack_damage": 10
+    },
+    {
+      "id": "shopkeeper", "names": ["Morgan Teal"],
+      "walk_mps": 1.19, "run_mps": 3.5, "courage": 0.37, "health": 87,
+      "styles": [["#c7b78f", "#335f5c"]], "cash": [10, 26], "shopkeeper": true
+    }
   ]
 }
