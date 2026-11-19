@@ -14,6 +14,7 @@ from panda3d.core import (
 
 from game.ai.pedestrians import Pedestrian, PedestrianManager
 from game.ai.traffic import Traffic
+from game.ai.witnesses import witnesses_for
 from game.core.camera import ThirdPersonCamera
 from game.core.config import ASSETS, PRESETS, ROOT, Settings, memory_gib, pick_quality, project_file, read_json, write_json
 from game.core.events import EventBus
@@ -21,6 +22,7 @@ from game.core.lighting import CityLighting
 from game.core.performance import PerformanceLog
 from game.core.pickups import Pickups
 from game.core.rules import apply_damage
+from game.core.wanted import OFFENSES, Wanted
 from game.entities.player import Player
 from game.entities.vehicles import Vehicle
 from game.entities.weapons import HitTarget, WEAPON_SPECS, WeaponSystem, build_weapon_model, weapon_muzzle
@@ -142,6 +144,7 @@ class HarborCity(ShowBase):
         self.traffic = Traffic(self.render, self.physics, self.city, self.events,
                                audio_loader=self.vehicle_audio, cap=traffic_limit)
         self.weapons = WeaponSystem(self.render, self.physics, self.events, audio_loader=self.vehicle_audio)
+        self.wanted = Wanted()
         self.pickups = Pickups(self.render, self.events)
         self.delivery = DeliveryJob(self.render, self.city, self.events)
         self.store = read_json(ROOT / "game/data/shop.json")
@@ -153,6 +156,11 @@ class HarborCity(ShowBase):
         self.events.subscribe("pedestrian_bump", self.on_pedestrian_bump)
         self.events.subscribe("npc_shot", self.on_npc_shot)
         self.events.subscribe("mission_completed", self.on_mission_completed)
+        self.events.subscribe("crime", self.on_crime)
+        self.events.subscribe("gunshot", self.on_gunshot)
+        self.events.subscribe("pedestrian_death", self.on_pedestrian_death)
+        self.events.subscribe("hit_and_run", self.on_hit_and_run)
+        self.events.subscribe("explosion", self.on_explosion_crime)
         self.overlay = None
         if not self.headless:
             minimap = project_file(ASSETS / "minimap.png")
@@ -352,7 +360,8 @@ class HarborCity(ShowBase):
             if person is not None:
                 self.peds.displaced_driver(person, self.player.position, hostile=driver.hostile,
                                            from_position=vehicle.position)
-            self.events.publish("crime", kind="car_theft", position=vehicle.position, offender=self.player)
+            self.events.publish("crime", kind="car_theft", position=vehicle.position, offender=self.player,
+                                vehicle=vehicle)
             self.events.publish("carjacking", vehicle=vehicle, offender=self.player)
         if theft.remaining <= 0:
             self.theft = None
@@ -390,6 +399,37 @@ class HarborCity(ShowBase):
 
     def on_mission_completed(self, title, reward):
         self.show_notice(f"{title} complete  +${reward}")
+
+    def on_crime(self, kind, position, offender=None, witnesses=None, victim=None, vehicle=None, **_):
+        if offender is not self.player or kind not in OFFENSES:
+            return
+        if witnesses is None:
+            exclusions = (self.player.controller,
+                          vehicle.body if vehicle is not None else None,
+                          self.occupied.body if self.occupied is not None else None)
+            witnesses = witnesses_for(self.physics, kind, position, self.peds.people,
+                                      self.traffic.vehicles, ignore=exclusions, victim=victim)
+        previous = self.wanted.stars
+        if self.wanted.report(kind, position, witnesses, self.elapsed):
+            self.events.publish("witnessed_crime", kind=kind, position=position, witnesses=tuple(witnesses),
+                                offender=offender, stars=self.wanted.stars)
+            if self.wanted.stars > previous:
+                self.show_notice(f"Wanted level {self.wanted.stars}")
+
+    def on_gunshot(self, position, owner=None, witnesses=None, **_):
+        self.on_crime("shooting", position, owner, witnesses)
+
+    def on_pedestrian_death(self, person, source, position, witnesses=None, **_):
+        player_car = self.occupied is not None and source is self.occupied
+        self.on_crime("killing", position, self.player if player_car else source, witnesses,
+                      victim=person, vehicle=source if player_car else None)
+
+    def on_hit_and_run(self, person, vehicle, position, witnesses=None, **_):
+        if vehicle is self.occupied:
+            self.on_crime("hit_and_run", position, self.player, witnesses, victim=person, vehicle=vehicle)
+
+    def on_explosion_crime(self, position, owner=None, witnesses=None, **_):
+        self.on_crime("explosion", position, owner, witnesses)
 
     def on_pedestrian_bump(self, message, position, **_):
         if (position - self.focus()).length_squared() < 8 ** 2:
@@ -592,6 +632,7 @@ class HarborCity(ShowBase):
         self.player.animate(dt)
         if advance_clock:
             self.elapsed += dt
+            self.wanted.update(self.elapsed)
             self.city.set_signal_time(self.elapsed)
             focus = self.focus()
             self.peds.update(dt, self.elapsed, focus, self.player,
@@ -707,6 +748,7 @@ class HarborCity(ShowBase):
             "hour": self.lighting.hour, "health": self.player.health, "money": self.player.money,
             "armor": self.player.armor, "weapons": self.weapons.snapshot(),
             "mission": self.delivery.snapshot(self.vehicles),
+            "wanted": self.wanted.snapshot(self.elapsed),
             "occupied": self.vehicles.index(self.occupied) if self.occupied else None,
             "vehicles": [{"kind": car.kind, "position": list(car.position),
                           "hpr": list(car.node.get_hpr()), "health": car.health}
@@ -782,6 +824,7 @@ class HarborCity(ShowBase):
             self.occupied = cars[index]
             self.player.set_active(False)
         self.delivery.restore(data.get("mission"), cars)
+        self.wanted.restore(data.get("wanted"), self.elapsed)
         self.city.update(self.focus(), eager=True)
         self.sync_vehicles()
 
