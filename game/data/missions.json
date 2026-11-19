@@ -1,4 +1,15 @@
 {
   "schema": 1,
-  "missions": []
+  "missions": [
+    {
+      "id": "dock_run",
+      "title": "Dock Run",
+      "start": [11.1, 101, 0.19],
+      "destination": [582.35, 98, 0.0],
+      "destination_name": "Foundry Docks",
+      "reward": 240,
+      "arrival_radius": 5.5,
+      "maximum_finish_kph": 12
+    }
+  ]
 }

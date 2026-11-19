@@ -38,6 +38,13 @@ SHOP_POSITION = (15.6, 46, SIDEWALK + .01)
 HOSPITAL_POSITION = (13.5, -28, SIDEWALK + .01)
 SHOP_NAME = "Tideway Supply"
 HOSPITAL_NAME = "Breakwater Clinic"
+BENCH_TOP = .75
+BENCH_REACH = 1.05
+BENCH_FACING = {
+    "north": (0, 1, 0.0),
+    "south": (0, -1, 180.0),
+    "west": (-1, 0, 90.0),
+}
 
 PIXEL_FONT = {
     "A": (2, 5, 7, 5, 5), "B": (6, 5, 6, 5, 6), "C": (3, 4, 4, 4, 3),
@@ -193,18 +200,46 @@ def tree(mesh, collider, x, y, rng, palm=False):
               tuple(c * 1.12 for c in foliage))
 
 
-def bench(mesh, x, y, facing="south"):
+def bench_layout(district, ix, iy):
+    """Bench centers and orientations shared by the mesh and seat positions."""
+    if district == "park":
+        return tuple((x, y, facing) for x in (23, 52, 86, 113)
+                     for y, facing in ((66.15, "north"), (75.8, "south")))
+    if district == "residential":
+        return ((12.7, 69.1, "west"),)
+    if district == "downtown" and (ix, iy) == (0, 0):
+        return ((24, 26.65, "west"), (24, 32, "west"))
+    if district == "beachfront":
+        return tuple((x, y + .92, "north") for x, y in
+                     ((33, 76), (63, 89), (75, 106), (108, 110)))
+    return ()
+
+
+def bench(mesh, collider, x, y, facing):
+    dx, dy, _ = BENCH_FACING[facing]
     wood = (.56, .36, .24)
-    if facing == "south":
-        mesh.box((x, y, .69), (2.4, .65, .12), wood)
-        mesh.box((x, y + .31, 1.04), (2.4, .09, .40), wood)
-        for dx in (-.92, .92):
-            mesh.box((x + dx, y, .45), (.13, .47, .46), POST)
-    else:
-        mesh.box((x, y, .69), (.65, 2.4, .12), wood)
-        mesh.box((x + .31, y, 1.04), (.09, 2.4, .40), wood)
-        for dy in (-.92, .92):
-            mesh.box((x, y + dy, .45), (.47, .13, .46), POST)
+    edge = (.65, .43, .29)
+
+    def transform(part, size):
+        along, forward, height = part
+        length, depth, thickness = size
+        center = (x - dy * along + dx * forward, y + dx * along + dy * forward, height)
+        dimensions = (depth, length, thickness) if dx else size
+        return center, dimensions
+
+    for slat in (-.214, 0, .214):
+        center, size = transform((0, slat, BENCH_TOP - .055), (2.4, .205, .11))
+        mesh.box(center, size, edge if slat > 0 else wood)
+    for height in (.906, 1.12):
+        center, size = transform((0, -.31, height), (2.4, .095, .17))
+        mesh.box(center, size, wood)
+    for end in (-.93, .93):
+        center, size = transform((end, -.015, .41), (.17, .50, .46))
+        mesh.box(center, size, POST)
+        center, size = transform((end, -.32, .948), (.12, .12, .47))
+        mesh.box(center, size, POST)
+    collider.box(*transform((0, 0, .465), (2.4, .63, .57)))
+    collider.box(*transform((0, -.31, .98), (2.4, .12, .46)))
 
 
 def kiosk(mesh, glow, collider, x, y, label, palette):
@@ -378,8 +413,6 @@ def downtown(mesh, glow, collider, ix, iy, rng):
         mesh.box((16.95, 36, 2.86), (.09, 4.67, .83), (.10, .29, .33))
         lettering(mesh, "west", 16.895, 36, 2.68, .098, "EXCHANGE", (.88, .82, .60))
         lettering(glow, "west", 16.883, 36, 2.68, .098, "EXCHANGE", (.91, .79, .54))
-        bench(mesh, 24, 25, "west")
-        bench(mesh, 24, 32, "west")
         for x, y in ((35, 30), (44, 30), (53, 30), (57, 46)):
             mesh.box((x, y, .41), (3.4, 3.4, .46), (.33, .40, .40))
             tree(mesh, collider, x, y, rng)
@@ -432,7 +465,6 @@ def residential(mesh, glow, collider, _ix, _iy, rng):
             tree(mesh, collider, x + 10, y + 14, rng)
     for along in (21, 58, 94, 120):
         tree(mesh, collider, 14, along, rng)
-    bench(mesh, 12.7, 69.1, "west")
 
 
 def container(mesh, collider, x, y, bottom, rng):
@@ -518,7 +550,6 @@ def beachfront(mesh, glow, collider, ix, iy, rng):
     for x, y in ((33, 76), (63, 89), (75, 106), (108, 110)):
         mesh.cone(x, y, SIDEWALK, 2.8, .066, .066, POST, 6)
         mesh.cone(x, y, 2.54, .70, 2.35, .06, rng.choice(surfer_colors), 8)
-        bench(mesh, x, y + .92)
     if iy == -8 and ix % 2 == 0:
         ramp(mesh, collider, 126, 100)
 
@@ -530,9 +561,6 @@ def park(mesh, glow, collider, ix, iy, rng):
     for x in (25, 46, 90, 112):
         for y in (25, 46, 93, 111):
             tree(mesh, collider, x + rng.uniform(-3, 3), y + rng.uniform(-3, 3), rng)
-    for x in (23, 52, 86, 113):
-        bench(mesh, x, 66)
-        bench(mesh, x, 77)
     if (ix + iy) % 2 == 0:
         kiosk(mesh, glow, collider, 48, 61, "GROVE", (.35, .47, .33))
     else:

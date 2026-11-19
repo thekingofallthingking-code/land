@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from random import Random
 
+from panda3d.bullet import BulletRigidBodyNode
 from panda3d.core import BitMask32, PandaNode, Point3, Vec3
 
 from game.fx.combat import CombatEffects
@@ -73,6 +74,7 @@ class _Contact:
     target: object | None
     headshot: bool = False
     soft: bool = False
+    scenery: bool = False
 
 
 class _CombatAudio:
@@ -241,8 +243,9 @@ class WeaponSystem:
             query = min(candidates, key=lambda hit: hit.get_hit_fraction(), default=None)
             if query is None:
                 return None
+        body = query.get_node()
         return _Contact(query.get_hit_pos(), query.get_hit_normal(), span * query.get_hit_fraction(),
-                        targets.get(query.get_node()))
+                        targets.get(body), scenery=isinstance(body, BulletRigidBodyNode) and body.is_static())
 
     def _trace(self, origin, direction, distance, ignore, targets, people):
         end = origin + direction * distance
@@ -335,6 +338,8 @@ class WeaponSystem:
                 self.effects.tracer(start, end)
                 if contact is not None:
                     self.effects.impact(end, contact.normal, soft=contact.soft)
+                    if contact.scenery:
+                        self.effects.bullet_hole(end, contact.normal, scale=.78 if spec.pellets > 1 else 1.0)
             if contact is not None and contact.target is not None:
                 damage = spec.damage * (spec.head_multiplier if contact.headshot else 1.0)
                 key = id(contact.target)

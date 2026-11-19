@@ -81,6 +81,9 @@ def check_combat(app):
 
 
 def check_carjacking_and_respawn(app):
+    _walk_to(app, app.delivery.start + Vec3(-.7, 0, 0))
+    _button(app, talk=True)
+    assert app.delivery.state == "find_car", "E did not accept Dock Run"
     _walk_to(app, Vec3(11.5, 111, .19))
     if len(app.traffic.vehicles) >= app.traffic.cap:
         farthest = max(app.traffic.vehicles, key=lambda car: (car.position - app.player.position).length_squared())
@@ -106,6 +109,15 @@ def check_carjacking_and_respawn(app):
     app.load_save()
     assert len(app.vehicles) == count and app.occupied is app.vehicles[-1], "The stolen car did not survive saving"
     assert app.weapons.owns("smg") and app.player.armor > 0, "The purchase or armor did not survive saving"
+    assert app.delivery.state == "deliver" and app.delivery.vehicle is app.occupied, "The delivery job did not survive saving"
+    cash = app.player.money
+    destination = app.delivery.destination
+    app.city.update(destination, eager=True)
+    app.occupied.node.set_pos(destination + Vec3(0, 0, .76))
+    app.occupied.body.set_linear_velocity(Vec3())
+    app.occupied.body.set_angular_velocity(Vec3())
+    _step(app, .16)
+    assert app.delivery.state == "complete" and app.player.money == cash + app.delivery.spec["reward"], "Dock Run failed to pay exactly once"
     app.events.publish("damage", target=app.player, amount=250, source="self-test")
     assert app.respawn_remaining > 0 and not app.player.active and not app.occupied, "Death did not release the car"
     _step(app, 3.16)
@@ -117,4 +129,4 @@ def run_city_replay(app):
     check_market(app)
     check_combat(app)
     check_carjacking_and_respawn(app)
-    print("SECTION 2 REPLAY PASS | population, shop, aim/head hit, reload, retaliation, pickups, carjacking, save and clinic", flush=True)
+    print("SECTION 2 REPLAY PASS | population, shop, aim/head hit, reload, retaliation, pickups, carjacking, save, Dock Run and clinic", flush=True)

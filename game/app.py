@@ -24,6 +24,7 @@ from game.core.rules import apply_damage
 from game.entities.player import Player
 from game.entities.vehicles import Vehicle
 from game.entities.weapons import HitTarget, WEAPON_SPECS, WeaponSystem, build_weapon_model, weapon_muzzle
+from game.missions.delivery import DeliveryJob
 from game.tools.assets import ensure_assets
 from game.ui.overlay import Overlay
 from game.world import City
@@ -77,6 +78,8 @@ class HarborCity(ShowBase):
         self.pressed: set[str] = set()
         self.vehicle_audio = None
         self.ambience = None
+        self.crowd = None
+        self.crowd_level = 0.0
         self.settings = Settings.load(SETTINGS_FILE)
         self.settings_path = SETTINGS_FILE
         self.save_path = SAVE_FILE
@@ -125,6 +128,10 @@ class HarborCity(ShowBase):
                 self.ambience.set_loop(True)
                 self.ambience.set_volume(.21)
                 self.ambience.play()
+                self.crowd = self.loader.load_sfx(str(ASSETS / "crowd.wav"))
+                self.crowd.set_loop(True)
+                self.crowd.set_volume(0)
+                self.crowd.play()
         self.vehicles = [
             Vehicle(self.render, self.physics, kind, position, heading,
                     audio_loader=self.vehicle_audio, events=self.events)
@@ -136,6 +143,7 @@ class HarborCity(ShowBase):
                                audio_loader=self.vehicle_audio, cap=traffic_limit)
         self.weapons = WeaponSystem(self.render, self.physics, self.events, audio_loader=self.vehicle_audio)
         self.pickups = Pickups(self.render, self.events)
+        self.delivery = DeliveryJob(self.render, self.city, self.events)
         self.store = read_json(ROOT / "game/data/shop.json")
         self.held_model = None
         self.refresh_held_model()
@@ -144,6 +152,7 @@ class HarborCity(ShowBase):
         self.events.subscribe("pickup_collected", self.on_pickup)
         self.events.subscribe("pedestrian_bump", self.on_pedestrian_bump)
         self.events.subscribe("npc_shot", self.on_npc_shot)
+        self.events.subscribe("mission_completed", self.on_mission_completed)
         self.overlay = None
         if not self.headless:
             minimap = project_file(ASSETS / "minimap.png")
@@ -379,6 +388,9 @@ class HarborCity(ShowBase):
     def on_pickup(self, message, **_):
         self.show_notice(message)
 
+    def on_mission_completed(self, title, reward):
+        self.show_notice(f"{title} complete  +${reward}")
+
     def on_pedestrian_bump(self, message, position, **_):
         if (position - self.focus()).length_squared() < 8 ** 2:
             self.show_notice(message)
@@ -434,6 +446,10 @@ class HarborCity(ShowBase):
         if self.conversation:
             self.end_conversation()
         elif not self.occupied and not self.theft:
+            if self.delivery.offered_at(self.player.position):
+                self.delivery.accept()
+                self.show_notice(f"{self.delivery.title} accepted")
+                return
             person = self.peds.nearby(self.player.position)
             if person is not None:
                 self.conversation = person
@@ -581,6 +597,7 @@ class HarborCity(ShowBase):
             self.peds.update(dt, self.elapsed, focus, self.player,
                              vehicles=(*self.vehicles, *self.traffic.vehicles), occupied=self.occupied)
             self.pickups.update(dt, self.player, self.weapons, focus)
+            self.delivery.update(self.player, self.occupied, self.vehicles)
             if self.respawn_remaining:
                 self.respawn_remaining -= dt
                 if self.respawn_remaining <= 0:
@@ -627,6 +644,12 @@ class HarborCity(ShowBase):
                 self.end_conversation()
         night = self.lighting.update(live_dt, focus, self.camera.get_pos())
         self.city.set_night(night)
+        if self.crowd and live_dt > 0:
+            nearby = sum(person.alive and (person.position - focus).length_squared() < 23 ** 2
+                         for person in self.peds.people)
+            volume = min(.23, max(0, nearby - 1) * .031)
+            self.crowd_level += (volume - self.crowd_level) * min(1, live_dt * 2.6)
+            self.crowd.set_volume(self.crowd_level)
         if self.overlay:
             vehicle = self.occupied
             context = self.context_prompt()
@@ -644,6 +667,7 @@ class HarborCity(ShowBase):
                 driving=vehicle is not None, car_health=vehicle.health if vehicle else 100,
                 armor=self.player.armor, weapon=self.weapons.selected.name, ammo=ammo, reserve=reserve,
                 reloading=self.weapons.reload_remaining > 0, aiming=self.aiming,
+                objective=self.delivery.objective(focus), waypoint=self.delivery.waypoint(),
             )
             if self.respawn_remaining:
                 self.overlay.show_wasted(self.respawn_remaining)
@@ -655,6 +679,8 @@ class HarborCity(ShowBase):
             return "F   Exit vehicle"
         if self.theft:
             return "Taking the wheel"
+        if self.delivery.offered_at(self.player.position):
+            return f"E   Start {self.delivery.title}"
         person = self.peds.nearby(self.player.position)
         if person is not None:
             return "E   Shop" if person.is_shopkeeper else "E   Talk"
@@ -680,6 +706,7 @@ class HarborCity(ShowBase):
             "schema": 2, "on_foot": list(self.player.position), "heading": self.follow_camera.heading,
             "hour": self.lighting.hour, "health": self.player.health, "money": self.player.money,
             "armor": self.player.armor, "weapons": self.weapons.snapshot(),
+            "mission": self.delivery.snapshot(self.vehicles),
             "occupied": self.vehicles.index(self.occupied) if self.occupied else None,
             "vehicles": [{"kind": car.kind, "position": list(car.position),
                           "hpr": list(car.node.get_hpr()), "health": car.health}
@@ -754,6 +781,7 @@ class HarborCity(ShowBase):
         if type(index) is int and index in cars:
             self.occupied = cars[index]
             self.player.set_active(False)
+        self.delivery.restore(data.get("mission"), cars)
         self.city.update(self.focus(), eager=True)
         self.sync_vehicles()
 
@@ -767,10 +795,13 @@ class HarborCity(ShowBase):
         self.performance.finish()
         if self.ambience:
             self.ambience.stop()
+        if self.crowd:
+            self.crowd.stop()
         if self.overlay:
             self.overlay.destroy()
         self.weapons.close()
         self.pickups.close()
+        self.delivery.close()
         self.peds.close()
         self.traffic.close()
         for vehicle in self.vehicles:

@@ -164,6 +164,7 @@ class Overlay:
         self.paused = self._root(base.a2dTopLeft, "pause menu")
         self.hud_top_left = self._root(base.a2dTopLeft, "locality")
         self.hud_top_right = self._root(base.a2dTopRight, "health and cash")
+        self.hud_top_center = self._root(base.a2dTopCenter, "current objective")
         self.hud_bottom_left = self._root(base.a2dBottomLeft, "minimap")
         self.hud_bottom_right = self._root(base.a2dBottomRight, "driving instruments")
         self.hud_bottom_center = self._root(base.a2dBottomCenter, "context prompts")
@@ -176,7 +177,7 @@ class Overlay:
         self.shop = self._root(base.a2dBottomCenter, "shop", sort=35)
         self.wasted = self._root(base.aspect2d, "wasted", sort=65)
         self.hud = (
-            self.hud_top_left, self.hud_top_right, self.hud_bottom_left,
+            self.hud_top_left, self.hud_top_right, self.hud_top_center, self.hud_bottom_left,
             self.hud_bottom_right, self.hud_bottom_center,
         )
 
@@ -250,6 +251,13 @@ class Overlay:
         self.armor_bar.set_pos(-.196, 0, -.201)
         _panel(self.armor_bar, "armor fill", 0, .125, 0, .017, ARMOR)
 
+        self.objective_group = self.hud_top_center.attach_new_node("objective")
+        _panel(self.objective_group, "objective backdrop", -.451, .451, -.148, -.048, DARK)
+        _panel(self.objective_group, "objective stripe", -.451, .451, -.053, -.048, MINT)
+        self.objective = _text(self.objective_group, "", 0, -.111, .041, PAPER, self.sans,
+                               align=TextNode.A_center, mutable=True)
+        self.objective_group.hide()
+
         parent = self.hud_bottom_left
         _panel(parent, "minimap frame", .048, .382, .048, .423, DARK)
         _text(parent, "N", .068, .388, .029, PALE, self.mono)
@@ -274,6 +282,11 @@ class Overlay:
         else:
             self.map_image.set_color(.13, .28, .31, 1)
         self.map_arrow = _map_arrow(self.map_origin)
+        self.map_waypoint = self.map_origin.attach_new_node("destination ping", 3)
+        self.map_waypoint.set_r(45)
+        _panel(self.map_waypoint, "destination outline", -.012, .012, -.012, .012, DARK)
+        _panel(self.map_waypoint, "destination fill", -.008, .008, -.008, .008, MINT, sort=1)
+        self.map_waypoint.hide()
 
         parent = self.hud_bottom_right
         _panel(parent, "instrument backdrop", -.500, -.048, .048, .305, DARK)
@@ -475,7 +488,7 @@ class Overlay:
             self.wasted_open = False
             self._sync_visibility()
 
-    def _update_minimap(self, position, heading):
+    def _update_minimap(self, position, heading, waypoint):
         extent = NORTH * 2
         u = (float(position[0]) + NORTH) / extent
         v = (float(position[1]) + NORTH) / extent
@@ -483,16 +496,27 @@ class Overlay:
         left = min(1 - self.map_zoom, max(0, u - half_map))
         bottom = min(1 - self.map_zoom, max(0, v - half_map))
         self.map_image.set_tex_offset(self.map_stage, left, bottom)
-        x = min(1, max(0, (u - left) / self.map_zoom))
-        z = min(1, max(0, (v - bottom) / self.map_zoom))
-        margin = .014
-        self.map_arrow.set_pos(margin + x * (MAP_SIZE - margin * 2), 0, margin + z * (MAP_SIZE - margin * 2))
+        margin = .018
+        self.map_arrow.set_pos(
+            min(MAP_SIZE - margin, max(margin, (u - left) * MAP_SIZE / self.map_zoom)), 0,
+            min(MAP_SIZE - margin, max(margin, (v - bottom) * MAP_SIZE / self.map_zoom)),
+        )
         self.map_arrow.set_r(-heading)
+        if waypoint is None:
+            self.map_waypoint.hide()
+            return
+        target_u = (float(waypoint[0]) + NORTH) / extent
+        target_v = (float(waypoint[1]) + NORTH) / extent
+        self.map_waypoint.set_pos(
+            min(MAP_SIZE - margin, max(margin, (target_u - left) * MAP_SIZE / self.map_zoom)), 0,
+            min(MAP_SIZE - margin, max(margin, (target_v - bottom) * MAP_SIZE / self.map_zoom)),
+        )
+        self.map_waypoint.show()
 
     def update(self, dt, *, district="", position=(0, 0, 0), heading=0, speed=0,
                rpm=0, gear="", health=100, money=0, hour=17, context="", fps=0,
                debug_info="", driving=False, car_health=100, armor=0, weapon="",
-               ammo=None, reserve=None, reloading=False, aiming=False):
+               ammo=None, reserve=None, reloading=False, aiming=False, objective="", waypoint=None):
         if self.state != "playing":
             return
         _set_text(self.district, district or "Harbor City")
@@ -503,7 +527,9 @@ class Overlay:
         self.health_bar.set_sx(max(.001, min(1, health / 100)))
         _set_text(self.armor_text, f"{max(0, min(100, armor)):0.0f}")
         self.armor_bar.set_sx(max(.001, min(1, armor / 100)))
-        self._update_minimap(position, heading)
+        self._update_minimap(position, heading, waypoint)
+        _set_text(self.objective, objective)
+        self.objective_group.show() if objective else self.objective_group.hide()
 
         self.driving = driving
         if driving and not self.wasted_open:

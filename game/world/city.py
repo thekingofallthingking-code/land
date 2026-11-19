@@ -9,7 +9,8 @@ from panda3d.bullet import BulletBoxShape, BulletConvexHullShape, BulletRigidBod
 from panda3d.core import BitMask32, Point3, PointLight, TransformState, Vec3, Vec4
 
 from .design import (
-    DISTRICT_BUILDERS, HOSPITAL_NAME, HOSPITAL_POSITION, POST, SHOP_NAME, SHOP_POSITION,
+    BENCH_FACING, BENCH_REACH, BENCH_TOP, DISTRICT_BUILDERS, HOSPITAL_NAME,
+    HOSPITAL_POSITION, SHOP_NAME, SHOP_POSITION, SIDEWALK, bench, bench_layout,
     street_lamp, street_surfaces, traffic_signal,
 )
 from .mesh import Mesh
@@ -30,6 +31,14 @@ class Chunk:
     glow: object
     signals: tuple
     lamps: tuple
+    seats: tuple
+
+
+@dataclass(frozen=True, slots=True)
+class BenchSeat:
+    position: Vec3
+    approach: Vec3
+    heading: float
 
 
 class Collision:
@@ -131,6 +140,12 @@ class City:
     def district(self, x, y):
         return DISTRICT_NAMES[district_at(*self._chunk_at(x, y))]
 
+    @property
+    def bench_seats(self) -> tuple[BenchSeat, ...]:
+        """Seating positions in active chunks, ordered by chunk and layout."""
+        return tuple(seat for key in sorted(self.loaded_chunks)
+                     for seat in self.loaded_chunks[key].seats)
+
     def is_loaded(self, x, y):
         """Test for ground collision in the streamed pavement owner's chunk."""
         key = self._pavement_chunk_at(x, y)
@@ -195,6 +210,16 @@ class City:
         district = district_at(ix, iy)
         street_surfaces(surface, ix, iy, district, rng)
         DISTRICT_BUILDERS[district](surface, glow, collision, ix, iy, rng)
+        seats = []
+        for x, y, facing in bench_layout(district, ix, iy):
+            bench(surface, collision, x, y, facing)
+            dx, dy, heading = BENCH_FACING[facing]
+            seat_x, seat_y = world_x + x, world_y + y
+            seats.append(BenchSeat(
+                Vec3(seat_x, seat_y, BENCH_TOP),
+                Vec3(seat_x + dx * BENCH_REACH, seat_y + dy * BENCH_REACH, SIDEWALK + .01),
+                heading,
+            ))
         for along in (28, 68, 108):
             for x, y, dx, dy in ((9.75, along, -1, 0),
                                  (134.25, along, 1, 0),
@@ -225,7 +250,7 @@ class City:
                 signal.reparentTo(root)
                 signal.setLightOff(1)
                 signal.setShaderOff(1)
-        chunk = Chunk(root, body, glow_node, signal_nodes, tuple(lamps))
+        chunk = Chunk(root, body, glow_node, signal_nodes, tuple(lamps), tuple(seats))
         self._apply_signals((ix, iy), chunk)
         collider_node = root.attachNewNode(body)
         collider_node.setPos(0, 0, 0)

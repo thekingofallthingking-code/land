@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ASSET_DIR = PROJECT_ROOT / "assets_generated"
 SAMPLE_RATE = 44_100
-AUDIO_VERSION = b"2\n"
+AUDIO_VERSION = b"4\n"
 Audio = NDArray[np.float64]
 
 
@@ -92,6 +92,59 @@ def _harbor(frames: int) -> Audio:
     return np.stack((middle + width, middle - width), axis=1)
 
 
+def _add_clip(track: Audio, clip: Audio, start: int, pan: float) -> None:
+    left = np.cos((pan + 1) * np.pi / 4)
+    right = np.sin((pan + 1) * np.pi / 4)
+    positions = (np.arange(len(clip)) + start) % len(track)
+    track[positions, 0] += clip * left
+    track[positions, 1] += clip * right
+
+
+def _crowd_syllable(rng: np.random.Generator, frames: int, pitch: float) -> Audio:
+    t = _time(frames)
+    age = t / t[-1]
+    glide = 1.0 + .052 * np.sin(np.pi * age) - .10 * age
+    phase = np.cumsum(glide) * (pitch * tau / SAMPLE_RATE)
+    low_formant = rng.uniform(365, 690)
+    high_formant = rng.uniform(1150, 2020)
+    voiced = np.zeros(frames)
+    for harmonic in range(1, 17):
+        frequency = harmonic * pitch
+        weight = np.exp(-((frequency - low_formant) / 165) ** 2)
+        weight += .42 * np.exp(-((frequency - high_formant) / 350) ** 2)
+        voiced += weight / np.sqrt(harmonic) * np.sin(phase * harmonic)
+    breath = .15 * _band_noise(rng, frames, 420, 1600)
+    swell = np.sin(np.pi * age).clip(0, 1) ** 1.65
+    return swell * (voiced + breath)
+
+
+def _crowd(frames: int) -> Audio:
+    """Layer distant, wordless syllables over a quiet continuous crowd bed."""
+    rng = np.random.default_rng(1520)
+    t = _time(frames)
+    loop_phase = t * tau * SAMPLE_RATE / frames
+    breath = _band_noise(rng, frames, 135, 1020)
+    swell = .71 + .19 * np.sin(loop_phase * 3) + .08 * np.sin(loop_phase * 7 + 1.5)
+    bed = .16 * breath * swell
+    width = .045 * _band_noise(rng, frames, 195, 1470)
+    track = np.stack((bed + width, bed - width), axis=1)
+    for voice in range(9):
+        pitch = rng.uniform(102, 208)
+        pan = rng.uniform(-.88, .88)
+        loudness = rng.uniform(.055, .118)
+        for phrase in range(3):
+            start = int((voice * .079 + phrase * .336 + rng.uniform(-.05, .10)) * frames)
+            for _ in range(3 if phrase != 1 else 4):
+                length = round(SAMPLE_RATE * rng.uniform(.15, .36))
+                syllable = _crowd_syllable(rng, length, pitch * rng.uniform(.91, 1.10))
+                _add_clip(track, syllable * loudness, start, pan)
+                start += round(length * rng.uniform(.84, 1.27))
+    # Rotate the periodic mix to a boundary where both channels change very little.
+    opening = track[:round(.1 * SAMPLE_RATE)]
+    seam = 1 + int(np.argmin(np.max(np.abs(np.diff(opening, axis=0)), axis=1)))
+    return np.roll(np.tanh(track), -seam, axis=0)
+
+
 def _horn(frames: int) -> Audio:
     t = _time(frames)
     envelope = (1 - np.exp(-110 * t)) * np.clip((t[-1] - t) / .062, 0, 1)
@@ -141,6 +194,7 @@ _AUDIO = {
     "tire.wav": (_tire, 2 * SAMPLE_RATE, 1, 0.61),
     "crash.wav": (_crash, SAMPLE_RATE, 1, 0.90),
     "harbor.wav": (_harbor, 12 * SAMPLE_RATE, 2, 0.38),
+    "crowd.wav": (_crowd, 16 * SAMPLE_RATE, 2, .40),
     "horn.wav": (_horn, round(.48 * SAMPLE_RATE), 1, .74),
     "weapon-pistol.wav": (partial(_arcade_report, seed=633, tone=103, decay=20, weight=.80),
                           round(.33 * SAMPLE_RATE), 1, .90),
@@ -165,14 +219,6 @@ def _synth(t: Audio, note: int, color: float, detune: float = 1.0) -> Audio:
     phase = tau * _frequency(note) * detune * t
     phase += color * np.sin(2 * phase)
     return np.sin(phase) + 0.26 * np.sin(2 * phase) + 0.11 * np.sin(3 * phase)
-
-
-def _add_clip(track: Audio, clip: Audio, start: int, pan: float) -> None:
-    left = np.cos((pan + 1) * np.pi / 4)
-    right = np.sin((pan + 1) * np.pi / 4)
-    positions = (np.arange(len(clip)) + start) % len(track)
-    track[positions, 0] += clip * left
-    track[positions, 1] += clip * right
 
 
 RADIO_BPM = 112

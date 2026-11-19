@@ -9,7 +9,7 @@ A standalone Python driving sandbox set in a procedurally built coastal city. Wa
 3. Open `run.bat`, then select **Play** or press Enter.
 4. Run `test.bat` for the unit tests and a bounded 65-second simulation replay.
 
-Tideway Supply is a short walk north of the starting car. Press E near its shopkeeper, then use 1–5 to buy equipment. F enters a parked car or starts a carjacking when an occupied car is stopped or moving slowly. Defeat returns you to Breakwater Clinic.
+Tideway Supply is a short walk north of the starting car. Press E near its shopkeeper, then use 1–5 to buy equipment. F enters a parked car or starts a carjacking when an occupied car is stopped or moving slowly. Defeat returns you to Breakwater Clinic. To start Dock Run, follow the minimap diamond to the gold marker north of the shop and press E. Take a car with a driver and stop it in the Foundry Docks bay.
 
 ## Controls
 
