@@ -153,11 +153,11 @@ class HarborCity(ShowBase):
                 self.sfxManagerList[0].set_volume(self.settings.volume)
             if not self.testing:
                 self.vehicle_audio = self.loader
-                self.ambience = self.loader.load_sfx(str(ASSETS / "harbor.wav"))
+                self.ambience = self.loader.load_sfx(Filename.from_os_specific(str(ASSETS / "harbor.wav")))
                 self.ambience.set_loop(True)
                 self.ambience.set_volume(.21)
                 self.ambience.play()
-                self.crowd = self.loader.load_sfx(str(ASSETS / "crowd.wav"))
+                self.crowd = self.loader.load_sfx(Filename.from_os_specific(str(ASSETS / "crowd.wav")))
                 self.crowd.set_loop(True)
                 self.crowd.set_volume(0)
                 self.crowd.play()

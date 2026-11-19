@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import math
 from random import Random
 
+from panda3d.core import Filename
 from panda3d.core import AudioSound, BitMask32, Vec2, Vec3
 
 from game.entities.vehicles import ASSETS, Vehicle
@@ -335,7 +336,7 @@ class Traffic:
         if self.audio_loader is not None and state.horn is None:
             path = ASSETS / "horn.wav"
             if path.is_file():
-                state.horn = self.audio_loader.loadSfx(str(path))
+                state.horn = self.audio_loader.loadSfx(Filename.from_os_specific(str(path)))
                 attach = getattr(self.audio_loader, "attachSoundToObject", None)
                 if attach is not None and state.horn is not None:
                     attach(state.horn, car.node)

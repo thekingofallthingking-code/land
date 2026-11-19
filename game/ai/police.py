@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import json
 import math
 
+from panda3d.core import Filename
 from panda3d.core import AudioSound, BitMask32, Vec2, Vec3
 
 from game.ai.air_support import Helicopter
@@ -159,7 +160,7 @@ class PoliceFleet(Traffic):
         path = ASSETS / "siren.wav"
         if self.audio_loader is None or not path.is_file():
             return None
-        sound = self.audio_loader.loadSfx(str(path))
+        sound = self.audio_loader.loadSfx(Filename.from_os_specific(str(path)))
         if sound is not None:
             attach = getattr(self.audio_loader, "attachSoundToObject", None)
             if attach is not None:

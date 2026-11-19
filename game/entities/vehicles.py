@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 from panda3d.bullet import BulletBoxShape, BulletRigidBodyNode, BulletVehicle, ZUp
+from panda3d.core import Filename
 from panda3d.core import (
     BitMask32,
     Geom,
@@ -448,7 +449,7 @@ class Vehicle:
         path = ASSETS / f"{name}.wav"
         if self._audio_loader is None or not path.is_file():
             return None
-        sound = self._audio_loader.loadSfx(str(path))
+        sound = self._audio_loader.loadSfx(Filename.from_os_specific(str(path)))
         if sound is not None:
             attach = getattr(self._audio_loader, "attachSoundToObject", None)
             if attach is not None:

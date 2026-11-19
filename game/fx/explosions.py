@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from math import atan2, cos, hypot, sin, tau
 from random import Random
 
+from panda3d.core import Filename
 from panda3d.core import BitMask32, CardMaker, NodePath, PNMImage, Point3, Texture, TransparencyAttrib, Vec3
 
 from game.tools.assets import ASSET_DIR
@@ -173,7 +174,7 @@ class BlastEffects:
         self._sound_slot = 0
         if audio_loader is not None and (ASSET_DIR / "blast.wav").is_file():
             for _ in range(5):
-                sound = audio_loader.load_sfx(str(ASSET_DIR / "blast.wav"))
+                sound = audio_loader.load_sfx(Filename.from_os_specific(str(ASSET_DIR / "blast.wav")))
                 if sound is not None:
                     self._sounds.append((sound, Vec3(), 0.0))
 

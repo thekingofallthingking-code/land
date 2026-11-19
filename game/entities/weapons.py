@@ -8,6 +8,7 @@ from pathlib import Path
 from random import Random
 
 from panda3d.bullet import BulletRigidBodyNode
+from panda3d.core import Filename
 from panda3d.core import BitMask32, PandaNode, Point3, Vec3
 
 from game.fx.combat import CombatEffects
@@ -97,7 +98,7 @@ class _CombatAudio:
                 continue
             pool = []
             for _ in range(3 if key in ("pistol", "smg", "rifle") else 1):
-                sound = loader.loadSfx(str(path))
+                sound = loader.loadSfx(Filename.from_os_specific(str(path)))
                 if sound is None:
                     continue
                 location = self._root.attach_new_node(key)
