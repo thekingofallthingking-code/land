@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from panda3d.bullet import BulletCapsuleShape, BulletCharacterControllerNode, ZUp
+from panda3d.bullet import BulletCapsuleShape, BulletCharacterControllerNode, BulletSphereShape, ZUp
 from panda3d.core import (
     BitMask32,
     Geom,
@@ -13,6 +13,7 @@ from panda3d.core import (
     GeomVertexData,
     GeomVertexFormat,
     GeomVertexWriter,
+    TransformState,
     Vec3,
 )
 
@@ -229,6 +230,7 @@ class Player:
 
     EYE_HEIGHT = 1.55
     CAPSULE_HEIGHT = 1.78
+    _CAPSULE_RADIUS = .325
     _FOOT_OFFSET = CAPSULE_HEIGHT * .5 - .04  # Bullet's grounding margin.
     WALK_SPEED = 3.55
     SPRINT_SPEED = 7.1
@@ -236,8 +238,9 @@ class Player:
     def __init__(self, render, physics, spawn):
         self.physics = physics
         self._render = render
-        radius = .325
+        radius = self._CAPSULE_RADIUS
         self._capsule = BulletCapsuleShape(radius, self.CAPSULE_HEIGHT - 2 * radius, ZUp)
+        self._clearance_sphere = BulletSphereShape(radius - .015)
         self.controller, self.node = self._create_controller()
         self._rig_root = self.node.attach_new_node("player art")
         self._rig_root.set_z(-self._FOOT_OFFSET)
@@ -273,6 +276,26 @@ class Player:
     @property
     def grounded(self):
         return self.active and self.controller.is_on_ground()
+
+    def has_clearance(self, feet):
+        """Check whether a standing capsule fits at the supplied foot position."""
+        radius = self._CAPSULE_RADIUS
+        feet = Vec3(feet)
+        bottom = TransformState.make_pos(feet + Vec3(0, 0, radius))
+        top = TransformState.make_pos(feet + Vec3(0, 0, self.CAPSULE_HEIGHT - radius))
+        mask = self.controller.get_into_collide_mask()
+        if self.active:
+            self.physics.remove_character(self.controller)
+        try:
+            # A sphere swept along the spine covers the standing capsule.
+            # Sweeping both ways also detects obstacles overlapping an endpoint.
+            for start, end in ((bottom, top), (top, bottom)):
+                if self.physics.sweep_test_closest(self._clearance_sphere, start, end, mask, 0).has_hit():
+                    return False
+            return True
+        finally:
+            if self.active:
+                self.physics.attach_character(self.controller)
 
     def set_active(self, active):
         if self.active == active:

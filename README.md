@@ -7,7 +7,7 @@ A standalone Python driving sandbox set in a procedurally built coastal city. Se
 1. Extract the project to `C:\Projects\HarborCity`.
 2. Double-click `setup.bat` with 64-bit Python 3.12 or 3.11 installed. Setup creates a local environment, installs pinned packages from PyPI and synthesizes the audio. It writes `logs\setup.log`.
 3. Open `run.bat`, then select **Play** or press Enter.
-4. Run `test.bat` for the pure logic unit tests and a bounded 65-second simulation replay.
+4. Run `test.bat` for the unit tests and a bounded 65-second simulation replay.
 
 ## Controls
 
@@ -25,6 +25,10 @@ A standalone Python driving sandbox set in a procedurally built coastal city. Se
 | F5 | Save | Save |
 
 Quicksaves record the player's state, the time and parked vehicles in `save.json`. The title screen restores a valid save when entering the city. The quality choice is written to `settings.json` on first launch. Use `run.bat --quality Low` for a one-run override.
+
+## 1080p driving benchmark
+
+Run `run.bat --benchmark --quality Medium --width 1920 --height 1080 --frames 240` from the project directory. This performs a warmed, deterministic drive in an offscreen buffer and logs average FPS, median and 99th-percentile frame times, and the graphics renderer to `logs\game.log`. For a live check, use `run.bat --quality Medium --width 1920 --height 1080` and press F3 while driving.
 
 ## Development
 

@@ -3,10 +3,11 @@ import math
 import statistics
 import time
 
-from panda3d.core import Vec3
+from panda3d.bullet import BulletBoxShape, BulletRigidBodyNode
+from panda3d.core import BitMask32, Vec3
 
 from game.app import STEP, Controls
-from game.core.config import LOGS
+from game.core.config import LOGS, Settings, write_json
 
 
 def step(app, seconds, **controls):
@@ -23,11 +24,55 @@ def assert_finite(app):
     assert all(math.isfinite(value) for vector in vectors for value in vector), "Nonfinite scene transform"
 
 
+def check_vehicle_clearance(app):
+    vehicle = app.vehicles[0]
+    box = BulletRigidBodyNode("self-test obstacle")
+    box.add_shape(BulletBoxShape(Vec3(.27, .27, .24)))
+    box.set_into_collide_mask(BitMask32.bit(0))
+    obstacle = app.render.attach_new_node(box)
+    start = app.player.position
+    middle = (start + vehicle.position) / 2
+    obstacle.set_pos(middle.x, middle.y, start.z + 1.0)
+    app.physics.attach_rigid_body(box)
+    try:
+        assert app.nearby_vehicle() is None, "A barrier failed to prevent vehicle entry"
+    finally:
+        app.physics.remove_rigid_body(box)
+
+    preferred = app.safe_exit(vehicle)
+    assert preferred is not None, "Expected a clear starting vehicle exit"
+    obstacle.set_pos(preferred + Vec3(0, 0, 1.53))
+    app.physics.attach_rigid_body(box)
+    try:
+        other_side = app.safe_exit(vehicle)
+        assert other_side is not None and (other_side - preferred).length() > 1, "Obstructed exit was selected"
+    finally:
+        app.physics.remove_rigid_body(box)
+        obstacle.remove_node()
+
+    app.interact_vehicle()
+    assert app.occupied is vehicle
+    vehicle.body.set_linear_velocity(vehicle.node.get_quat().get_right() * 8)
+    try:
+        app.interact_vehicle()
+        assert app.occupied is vehicle, "Exit allowed while the car was sliding sideways"
+    finally:
+        vehicle.body.set_linear_velocity(Vec3())
+    app.interact_vehicle()
+    assert app.occupied is None
+    app.player.teleport(start)
+
+
 def run_self_test(app, duration):
     started = time.perf_counter()
     app.begin_play()
     assert app.game_state == "playing"
     assert app.nearby_vehicle() is app.vehicles[0], "The first car is out of reach at spawn"
+    check_vehicle_clearance(app)
+    malformed = LOGS / "selftest-settings.json"
+    write_json(malformed, {"quality": []})
+    assert Settings.load(malformed).quality == "", "Invalid quality setting did not fall back to defaults"
+    assert not app.valid_vector([0, 0, 10 ** 500]), "Out-of-range save position was accepted"
     original = Vec3(app.player.position)
     step(app, .65, forward=-1, sprint=True)
     assert (app.player.position - original).length() > 2.5, "Sprint did not move the controller"

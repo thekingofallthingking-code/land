@@ -2,13 +2,17 @@
 import math
 
 from panda3d.core import (
-    AmbientLight, DirectionalLight, Fog, Geom, GeomNode,
+    AmbientLight, BitMask32, CullBinManager, DepthTestAttrib, DirectionalLight,
+    Fog, FrameBufferProperties, Geom, GeomNode,
     GeomTriangles, GeomVertexData, GeomVertexFormat, GeomVertexWriter,
-    Shader, Vec3, Vec4,
+    SamplerState, Shader, Texture, Vec3, Vec4,
 )
+
+from game.core.city_shader import city_shader
 
 START_HOUR = 16.37
 DAY_SECONDS = 1080.0
+SHADOW_MASK = BitMask32.bit(1)
 
 SKY_VERTEX = """
 #version 130
@@ -75,23 +79,31 @@ void main() {
 }
 """
 
-POST_FRAGMENT = """
+BLOOM_FRAGMENT = """
 #version 130
 uniform sampler2D tex;
-uniform float exposure;
 in vec2 uv;
 out vec4 result;
 vec3 hot(vec2 coord) {
     return max(texture(tex, coord).rgb - vec3(0.86), 0.0);
 }
 void main() {
-    vec3 scene = texture(tex, uv).rgb;
     vec2 px = 1.0 / vec2(textureSize(tex, 0));
-    vec3 fringe = hot(uv + px*vec2(3.5,1.5)) + hot(uv + px*vec2(-3.5,-1.5));
-    fringe += hot(uv + px*vec2(-1.5,3.5)) + hot(uv + px*vec2(1.5,-3.5));
-    fringe += (hot(uv + px*vec2(8.5,4.5)) + hot(uv + px*vec2(-8.5,-4.5))) * 0.55;
-    fringe += (hot(uv + px*vec2(-4.5,8.5)) + hot(uv + px*vec2(4.5,-8.5))) * 0.55;
-    vec3 c = (scene + fringe * 0.064) * exposure;
+    vec3 fringe = hot(uv + px*vec2(2.0,2.0)) + hot(uv + px*vec2(-2.0,-2.0));
+    fringe += hot(uv + px*vec2(-2.0,2.0)) + hot(uv + px*vec2(2.0,-2.0));
+    result = vec4(fringe * 0.25, 1.0);
+}
+"""
+
+POST_FRAGMENT = """
+#version 130
+uniform sampler2D tex;
+uniform sampler2D bloom_tex;
+uniform float exposure;
+in vec2 uv;
+out vec4 result;
+void main() {
+    vec3 c = (texture(tex, uv).rgb + texture(bloom_tex, uv).rgb * 0.40) * exposure;
     c = clamp((c*(2.51*c+0.03))/(c*(2.43*c+0.59)+0.14), 0.0, 1.0);
     float vignette = 1.0-0.13*dot((uv-0.5)*1.4,(uv-0.5)*1.4);
     result = vec4(pow(c,vec3(1.0/2.2)) * vignette,1.0);
@@ -123,9 +135,13 @@ def sky_mesh(parent):
     sky = parent.attach_new_node(node)
     sky.set_scale(100)
     sky.set_two_sided(True)
-    sky.set_bin("background", 1)
+    bins = CullBinManager.get_global_ptr()
+    if bins.find_bin("harbor sky") < 0:
+        bins.add_bin("harbor sky", CullBinManager.BT_unsorted, 25)
+    sky.set_bin("harbor sky", 0)
     sky.set_depth_write(False)
-    sky.set_depth_test(False)
+    sky.set_attrib(DepthTestAttrib.make(DepthTestAttrib.M_less_equal))
+    sky.hide(SHADOW_MASK)
     sky.set_light_off()
     sky.set_fog_off()
     sky.set_shader(Shader.make(Shader.SL_GLSL, SKY_VERTEX, SKY_FRAGMENT), 10)
@@ -137,7 +153,7 @@ def mix(a, b, t):
 
 
 class CityLighting:
-    def __init__(self, base, preset, *, rendered=True):
+    def __init__(self, base, preset, city_root, *, rendered=True):
         self.base = base
         self.hour = START_HOUR
         self.night = 0.0
@@ -151,9 +167,14 @@ class CityLighting:
         self.ambient = base.render.attach_new_node(ambient)
         base.render.set_light(self.ambient)
         sun = DirectionalLight("sun")
+        sun.set_priority(10)
         self.sun = base.render.attach_new_node(sun)
         base.render.set_light(self.sun)
+        self.shadow_size = preset["shadow"]
+        self.shadow_active = bool(self.shadow_size)
+        base.cam.node().set_camera_mask(BitMask32.bit(0))
         if preset["shadow"]:
+            sun.set_camera_mask(SHADOW_MASK)
             sun.set_shadow_caster(True, preset["shadow"], preset["shadow"])
             sun.get_lens().set_film_size(120, 120)
             sun.get_lens().set_near_far(5, 350)
@@ -167,13 +188,35 @@ class CityLighting:
             render_node=base.render, window=base.win, camera_node=base.cam,
             taskmgr=base.task_mgr, max_lights=6, enable_fog=True,
             enable_shadows=bool(preset["shadow"]), msaa_samples=preset["msaa"],
-            exposure=-.17,
+            use_emission_maps=False, exposure=-.17,
         )
+        self.city_root = city_root
+        city_root.set_shader(city_shader())
+        city_root.set_shader_input("sun_shadows", self.shadow_active)
         if preset["shadow"]:
-            # Use the existing simplepbr HDR render target, avoiding a second scene render.
-            self.pipeline._post_process_quad.set_shader(
-                Shader.make(Shader.SL_GLSL, POST_VERTEX, POST_FRAGMENT)
-            )
+            self._init_bloom()
+
+    def _init_bloom(self):
+        # The pinned simplepbr pipeline owns the HDR scene buffer and window-resize handling.
+        post = self.pipeline._post_process_quad
+        source = post.get_shader_input("tex").get_texture()
+        glow = Texture("quarter-resolution bloom")
+        glow.set_minfilter(SamplerState.FT_linear)
+        glow.set_magfilter(SamplerState.FT_linear)
+        glow.set_wrap_u(SamplerState.WM_clamp)
+        glow.set_wrap_v(SamplerState.WM_clamp)
+        props = FrameBufferProperties()
+        props.set_float_color(True)
+        props.set_rgba_bits(16, 16, 16, 16)
+        extract = self.pipeline._filtermgr.render_quad_into(
+            "harbor bloom", div=4, colortex=glow, fbprops=props,
+        )
+        if extract is not None:
+            self.bloom_quad = extract
+            extract.set_shader(Shader.make(Shader.SL_GLSL, POST_VERTEX, BLOOM_FRAGMENT))
+            extract.set_shader_input("tex", source)
+            post.set_shader(Shader.make(Shader.SL_GLSL, POST_VERTEX, POST_FRAGMENT))
+            post.set_shader_input("bloom_tex", glow)
 
     def update(self, dt, focus, camera_position):
         self.hour = (self.hour + dt * 24.0 / DAY_SECONDS) % 24.0
@@ -188,6 +231,11 @@ class CityLighting:
         moon_direction.normalize()
         golden = max(0.0, 1.0 - abs(day) * 1.65)
         sunlight = max(0.0, min(1.65, (day + .09) * 3.7))
+        show_shadow = bool(self.shadow_size and sunlight > .01)
+        if show_shadow != self.shadow_active:
+            self.sun.node().set_shadow_caster(show_shadow, self.shadow_size, self.shadow_size)
+            self.shadow_active = show_shadow
+            self.city_root.set_shader_input("sun_shadows", show_shadow)
         sun_color = mix(Vec3(1.0, .87, .70), Vec3(1.0, .43, .24), golden)
         self.sun.node().set_color(Vec4(*(sun_color * sunlight), 1))
         self.sun.set_pos(focus + sun_direction * 155)
@@ -212,3 +260,4 @@ class CityLighting:
     def close(self):
         if self.pipeline:
             self.base.task_mgr.remove("simplepbr update")
+            self.pipeline._filtermgr.cleanup()

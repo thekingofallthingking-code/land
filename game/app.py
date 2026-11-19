@@ -1,7 +1,6 @@
 """Harbor City application and fixed-step simulation."""
 from dataclasses import dataclass
 import logging
-import math
 import os
 from pathlib import Path
 
@@ -85,7 +84,7 @@ class HarborCity(ShowBase):
         self.city.update(self.city.spawn, eager=True)
         self.player = Player(self.render, self.physics, self.city.spawn)
         self.follow_camera = ThirdPersonCamera(self.camera, self.physics, sensitivity=self.settings.sensitivity)
-        self.lighting = CityLighting(self, preset, rendered=not self.headless)
+        self.lighting = CityLighting(self, preset, self.city.root, rendered=not self.headless)
         if options.hour is not None:
             self.lighting.hour = options.hour % 24
         if not self.headless:
@@ -135,7 +134,7 @@ class HarborCity(ShowBase):
 
     def windowEvent(self, window):
         super().windowEvent(window)
-        if not self.testing and window is self.win and not window.get_properties().get_foreground():
+        if not self.testing and window == self.win and not window.get_properties().get_foreground():
             if self.game_state == "playing":
                 self.set_state("paused")
 
@@ -208,11 +207,18 @@ class HarborCity(ShowBase):
     def nearby_vehicle(self):
         distance = 3.8 ** 2
         nearest = None
+        feet = self.player.position
+        start = feet + Vec3(0, 0, 1.0)
+        player_body = self.player.node.node()
         for vehicle in self.vehicles:
             if not vehicle.physics_active:
                 continue
-            candidate = (vehicle.position - self.player.position).length_squared()
+            candidate = (vehicle.position - feet).length_squared()
             if candidate < distance:
+                end = vehicle.position + Vec3(0, 0, .55)
+                ray = self.physics.ray_test_all(start, end, BitMask32.bit(0))
+                if any(hit.get_node() not in (player_body, vehicle.body) for hit in ray.get_hits()):
+                    continue
                 distance, nearest = candidate, vehicle
         return nearest
 
@@ -225,7 +231,7 @@ class HarborCity(ShowBase):
                 self.follow_camera.update(0, self.player, vehicle, snap=True)
             return
         vehicle = self.occupied
-        if abs(vehicle.speed_kph) > 19:
+        if vehicle.body.get_linear_velocity().length_squared() > (19 / 3.6) ** 2:
             if self.overlay:
                 self.overlay.notify("Slow down to exit")
             return
@@ -253,7 +259,9 @@ class HarborCity(ShowBase):
                 continue
             ground = self.physics.ray_test_closest(end, end - Vec3(0, 0, 2.8), BitMask32.bit(0))
             if ground.has_hit() and ground.get_hit_normal().z > .55:
-                return ground.get_hit_pos() + Vec3(0, 0, .04)
+                feet = ground.get_hit_pos() + Vec3(0, 0, .04)
+                if self.player.has_clearance(feet):
+                    return feet
         return None
 
     def advance(self, dt, controls):
@@ -367,7 +375,7 @@ class HarborCity(ShowBase):
     @staticmethod
     def valid_vector(value):
         return isinstance(value, list) and len(value) == 3 and all(
-            isinstance(item, (float, int)) and math.isfinite(item) for item in value
+            isinstance(item, (float, int)) and -100_000 <= item <= 100_000 for item in value
         )
 
     def load_save(self):
@@ -382,7 +390,7 @@ class HarborCity(ShowBase):
                 setattr(self.player, key, int(value))
         for key, target in (("hour", self.lighting), ("heading", self.follow_camera)):
             value = data.get(key)
-            if isinstance(value, (float, int)) and math.isfinite(value):
+            if isinstance(value, (float, int)) and -100_000 <= value <= 100_000:
                 setattr(target, key, value % (24 if key == "hour" else 360))
         records = data.get("vehicles")
         if isinstance(records, list):

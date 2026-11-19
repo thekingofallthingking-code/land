@@ -13,6 +13,7 @@ PROJECT = Path(__file__).resolve().parents[2]
 INTERACTIVE_TIMEOUT = 4 * 60 * 60
 TEST_TIMEOUT = 90
 PYPI = "https://pypi.org/simple"
+PYTHON_FLAGS = ("-E", "-s")
 PYTHON_CHECK = (
     "import os, sys, sysconfig; raise SystemExit(sys.version_info[:2] not in "
     "((3, 12), (3, 11)) or sys.maxsize <= 2**32 or "
@@ -32,7 +33,8 @@ def run_setup_step(label, command, deadline, environment, log):
     log.write(f"\n{label}\n")
     log.flush()
     result = subprocess.run(
-        command, cwd=PROJECT, env=environment, stdout=log, stderr=subprocess.STDOUT,
+        [command[0], *PYTHON_FLAGS, *command[1:]],
+        cwd=PROJECT, env=environment, stdout=log, stderr=subprocess.STDOUT,
         timeout=deadline, check=False,
     )
     if result.returncode:
@@ -54,6 +56,7 @@ def setup():
             environment = os.environ.copy()
             environment.pop("PYTHONHOME", None)
             environment.pop("PYTHONPATH", None)
+            environment.pop("PYTHONPYCACHEPREFIX", None)
             environment["PYTHONNOUSERSITE"] = "1"
             environment["PIP_CONFIG_FILE"] = os.devnull
             scratch = project_path("logs", "setup-tmp")
@@ -119,7 +122,7 @@ def run_python(arguments, timeout):
         print("FAIL - Harbor City exceeded its allotted time.", file=sys.stderr)
         return 124
     try:
-        with subprocess.Popen([sys.executable, *arguments], cwd=PROJECT) as child:
+        with subprocess.Popen([sys.executable, *PYTHON_FLAGS, *arguments], cwd=PROJECT) as child:
             try:
                 return child.wait(timeout=timeout)
             except subprocess.TimeoutExpired:

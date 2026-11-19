@@ -5,5 +5,5 @@ if not exist ".venv\Scripts\python.exe" (
     echo FAIL - Run setup.bat to create the project environment.
     exit /b 1
 )
-".venv\Scripts\python.exe" "game\tools\launch.py" run %*
+".venv\Scripts\python.exe" -I "game\tools\launch.py" run %*
 exit /b %errorlevel%

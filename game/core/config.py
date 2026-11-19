@@ -77,8 +77,9 @@ class Settings:
     def load(cls, path: Path):
         data = read_json(path)
         result = cls()
-        if data.get("quality") in PRESETS:
-            result.quality = data["quality"]
+        quality = data.get("quality")
+        if isinstance(quality, str) and quality in PRESETS:
+            result.quality = quality
         for key, lower, upper in (("sensitivity", .04, .7), ("volume", 0, 1)):
             value = data.get(key)
             if isinstance(value, (float, int)) and lower <= value <= upper:
